@@ -23,8 +23,19 @@ const FlowRegionTabs: React.FC<IFlowRegionTabsProps> = ({ steps, selectedRegion,
     return [...KNOWN_FLOW_REGIONS, ...extras];
   }, [steps]);
 
+  // "All"'s own count is the SUM of the real region counts (added
+  // 2026-09-15 at the user's request) rather than steps.length outright -
+  // a step with no region tag at all doesn't show up under ANY real
+  // region tab, so counting it in "All" too made that number not add up
+  // to UK+US+SA+Global, for something nobody can even act on there since
+  // adding/editing is blocked from "All" once a Process ID uses regions
+  // (see addBlockedInAllView in SwimlaneStudio.tsx). Untagged steps are
+  // still visible when "All" is clicked - this only changes what the
+  // badge counts, not what the view itself shows.
   const countFor = (region: string | undefined): number =>
-    region === undefined ? steps.length : steps.filter(s => s.region === region).length;
+    region === undefined
+      ? regions.reduce((sum, r) => sum + steps.filter(s => s.region === r).length, 0)
+      : steps.filter(s => s.region === region).length;
 
   return (
     <div className={styles.tabs}>
