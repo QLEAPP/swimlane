@@ -47,22 +47,31 @@ import qleLogo from '../../assets/qle-logo.svg';
 
 type MainTab = 'flows' | 'employees' | 'risks' | 'controls' | 'audit' | 'improvements';
 
-// Single-level undo (the last destructive action only, not a full stack) -
-// covers the three actions that lose data outright: deleting a step,
-// bulk-deleting a whole flow, and editing (which overwrites the previous
-// field values). Adding/moving a step isn't covered - a mistaken add is
-// trivial to just delete, and a mistaken drag is trivial to just drag
-// back. NOTE: undoing a delete re-creates the step via addProcessStep,
-// which appends it as a new row rather than reinserting it at its exact
-// original position - if another step's DependsOn token referenced it by
-// original row number (see dependencyResolution.ts), that link won't
-// perfectly restore. Pre-existing limitation of the row-number dependency
-// system, not something undo makes worse - deleting already shifts every
-// later row's number regardless of whether the delete is later undone.
+// Full multi-level undo stack (changed 2026-09-15 at the user's request -
+// was single-level, only ever covering the one most recent action) -
+// covers every action that loses data outright: deleting a step,
+// bulk-deleting a whole flow or section, editing (which overwrites the
+// previous field values), and renaming/renumbering a section (which
+// overwrites several steps' values at once - see bulkEdit). Adding/moving
+// a step isn't covered - a mistaken add is trivial to just delete, and a
+// mistaken drag is trivial to just drag back. NOTE: undoing a delete
+// re-creates the step via addProcessStep, which appends it as a new row
+// rather than reinserting it at its exact original position - if another
+// step's DependsOn token referenced it by original row number (see
+// dependencyResolution.ts), that link won't perfectly restore.
+// Pre-existing limitation of the row-number dependency system, not
+// something undo makes worse - deleting already shifts every later row's
+// number regardless of whether the delete is later undone.
 type UndoAction =
   | { type: 'delete'; step: IProcessStep }
   | { type: 'bulkDelete'; steps: IProcessStep[] }
-  | { type: 'edit'; previous: IProcessStep };
+  | { type: 'edit'; previous: IProcessStep }
+  | { type: 'bulkEdit'; previous: IProcessStep[] };
+
+// Caps how far back undo can go, same reasoning most editors cap undo
+// depth - an unbounded stack would just be a slow memory leak across a
+// long editing session most of which will never actually get undone.
+const MAX_UNDO_STACK = 20;
 
 // Promise.allSettled gives back whatever the rejection actually was, not
 // necessarily an Error instance - GraphDataService rejects with a real
@@ -175,19 +184,27 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // sharing lockDialogMode's 'lock' | 'unlock' pattern.
   const [commentDialogOpen, setCommentDialogOpen] = React.useState(false);
   const [commentValue, setCommentValue] = React.useState('');
-  const [lastAction, setLastAction] = React.useState<UndoAction | undefined>(undefined);
+  // Oldest action first, most recent (what Undo acts on next) last - a
+  // real stack, not just the one last action (see the UndoAction comment).
+  const [undoStack, setUndoStack] = React.useState<UndoAction[]>([]);
   const [activeTab, setActiveTab] = React.useState<MainTab>('flows');
 
   // The undo banner doesn't linger forever - clears itself a while after
-  // the action it's offering to undo, same as most "Undo" toasts. Resets
-  // on every new action (the effect re-runs since lastAction is a new
-  // object reference each time), so a fresh action always gets the full
-  // window rather than inheriting whatever was left of a previous one.
+  // the last action, same as most "Undo" toasts. Resets on every push OR
+  // pop (the effect re-runs since undoStack is a new array reference each
+  // time), so ongoing activity always gets the full window rather than
+  // inheriting whatever was left of a previous one. Clears the WHOLE
+  // stack when it fires, not just the banner - an undo history nobody's
+  // touched in a while isn't worth holding onto indefinitely.
   React.useEffect(() => {
-    if (!lastAction) return;
-    const timer = window.setTimeout(() => setLastAction(undefined), 10000);
+    if (undoStack.length === 0) return;
+    const timer = window.setTimeout(() => setUndoStack([]), 10000);
     return () => window.clearTimeout(timer);
-  }, [lastAction]);
+  }, [undoStack]);
+
+  const pushUndo = (action: UndoAction): void => {
+    setUndoStack(prev => [...prev.slice(-(MAX_UNDO_STACK - 1)), action]);
+  };
 
   // Promise.allSettled, not Promise.all - the three sources are genuinely
   // independent (separate SharePoint lists, each with its own chance of
@@ -484,7 +501,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     const stamped = withModifiedStamp(updated);
     setSteps(prev => prev.map(s => (s.id === stamped.id ? stamped : s)));
     dataService.updateProcessStep(stamped).catch((err: Error) => setError(err.message));
-    if (previous) setLastAction({ type: 'edit', previous });
+    if (previous) pushUndo({ type: 'edit', previous });
   };
 
   const handleDeleteStep = (stepId: string): void => {
@@ -492,7 +509,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     const step = steps.find(s => s.id === stepId);
     setSteps(prev => prev.filter(s => s.id !== stepId));
     dataService.deleteProcessStep(stepId).catch((err: Error) => setError(err.message));
-    if (step) setLastAction({ type: 'delete', step });
+    if (step) pushUndo({ type: 'delete', step });
   };
 
   // Deletes every step currently visible - the whole selected Process Step
@@ -507,35 +524,46 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     idsToDelete.forEach(id => {
       dataService.deleteProcessStep(id).catch((err: Error) => setError(err.message));
     });
-    setLastAction({ type: 'bulkDelete', steps: deleted });
+    pushUndo({ type: 'bulkDelete', steps: deleted });
     setBulkDeleteOpen(false);
   };
 
+  // Pops and reverts just the MOST RECENT action, not the whole stack -
+  // click Undo again right after and the banner already shows the next
+  // one back, same chained feel as a real multi-level undo without a
+  // separate history-browsing UI to build.
   const handleUndo = (): void => {
-    if (!lastAction) return;
-    if (lastAction.type === 'edit') {
+    if (undoStack.length === 0) return;
+    const action = undoStack[undoStack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    if (action.type === 'edit') {
       // Undoing IS itself a real modification event (someone just acted,
       // right now) even though the CONTENT reverts to old values - so this
       // gets a fresh modifiedBy/modifiedAt too, same as any other edit,
       // rather than silently reverting the audit trail along with the
       // content.
-      const stamped = withModifiedStamp(lastAction.previous);
+      const stamped = withModifiedStamp(action.previous);
       setSteps(prev => prev.map(s => (s.id === stamped.id ? stamped : s)));
       dataService.updateProcessStep(stamped).catch((err: Error) => setError(err.message));
-    } else if (lastAction.type === 'delete') {
-      const { id: _id, ...rest } = lastAction.step;
+    } else if (action.type === 'bulkEdit') {
+      action.previous.forEach(prevStep => {
+        const stamped = withModifiedStamp(prevStep);
+        setSteps(prev => prev.map(s => (s.id === stamped.id ? stamped : s)));
+        dataService.updateProcessStep(stamped).catch((err: Error) => setError(err.message));
+      });
+    } else if (action.type === 'delete') {
+      const { id: _id, ...rest } = action.step;
       dataService.addProcessStep(rest)
         .then(created => setSteps(prev => [...prev, created]))
         .catch((err: Error) => setError(err.message));
     } else {
-      lastAction.steps.forEach(step => {
+      action.steps.forEach(step => {
         const { id: _id, ...rest } = step;
         dataService.addProcessStep(rest)
           .then(created => setSteps(prev => [...prev, created]))
           .catch((err: Error) => setError(err.message));
       });
     }
-    setLastAction(undefined);
   };
 
   const handleImported = (created: IProcessStep[]): void => {
@@ -705,6 +733,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     const oldId = renameSectionTarget.processStepId;
     const newId = trimmedRenameSectionId;
     const affected = steps.filter(s => s.processStepId === oldId);
+    pushUndo({ type: 'bulkEdit', previous: affected });
     setSteps(prev => prev.map(s => (s.processStepId === oldId ? { ...s, processStepId: newId, processStepName: trimmedName } : s)));
     affected.forEach(step => {
       dataService.updateProcessStep({ ...step, processStepId: newId, processStepName: trimmedName }).catch((err: Error) => setError(err.message));
@@ -725,11 +754,13 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const handleDeleteSectionConfirm = (): void => {
     if (!renameSectionTarget) return;
     const targetId = renameSectionTarget.processStepId;
-    const idsToDelete = steps.filter(s => s.processStepId === targetId).map(s => s.id);
+    const deleted = steps.filter(s => s.processStepId === targetId);
+    const idsToDelete = deleted.map(s => s.id);
     setSteps(prev => prev.filter(s => !idsToDelete.includes(s.id)));
     idsToDelete.forEach(id => {
       dataService.deleteProcessStep(id).catch((err: Error) => setError(err.message));
     });
+    pushUndo({ type: 'bulkDelete', steps: deleted });
     if (drilledDownStepId === targetId) setDrilledDownStepId(undefined);
     setDeleteSectionConfirmOpen(false);
     setRenameSectionTarget(undefined);
@@ -1185,7 +1216,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         dialogContentProps={{
           type: DialogType.normal,
           title: `Delete section ${renameSectionTarget?.processStepId || ''}?`,
-          subText: `Deletes all ${steps.filter(s => s.processStepId === renameSectionTarget?.processStepId).length} step(s) in this section. This can't be undone.`
+          subText: `Deletes all ${steps.filter(s => s.processStepId === renameSectionTarget?.processStepId).length} step(s) in this section. Undo is available right after, but not once you navigate away or too much time passes.`
         }}
       >
         <DialogFooter>
@@ -1277,17 +1308,23 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           </MessageBar>
         )}
 
-        {lastAction && (
-          <MessageBar
-            messageBarType={MessageBarType.info}
-            onDismiss={() => setLastAction(undefined)}
-            actions={<MessageBarButton onClick={handleUndo}>Undo</MessageBarButton>}
-          >
-            {lastAction.type === 'delete' && `Deleted "${lastAction.step.actionDescription}".`}
-            {lastAction.type === 'bulkDelete' && `Deleted ${lastAction.steps.length} step${lastAction.steps.length === 1 ? '' : 's'}.`}
-            {lastAction.type === 'edit' && `Updated "${lastAction.previous.actionDescription}".`}
-          </MessageBar>
-        )}
+        {undoStack.length > 0 && (() => {
+          const lastAction = undoStack[undoStack.length - 1];
+          const earlierCount = undoStack.length - 1;
+          return (
+            <MessageBar
+              messageBarType={MessageBarType.info}
+              onDismiss={() => setUndoStack([])}
+              actions={<MessageBarButton onClick={handleUndo}>Undo</MessageBarButton>}
+            >
+              {lastAction.type === 'delete' && `Deleted "${lastAction.step.actionDescription}".`}
+              {lastAction.type === 'bulkDelete' && `Deleted ${lastAction.steps.length} step${lastAction.steps.length === 1 ? '' : 's'}.`}
+              {lastAction.type === 'edit' && `Updated "${lastAction.previous.actionDescription}".`}
+              {lastAction.type === 'bulkEdit' && `Renamed/renumbered ${lastAction.previous.length} step${lastAction.previous.length === 1 ? '' : 's'}.`}
+              {earlierCount > 0 && ` (${earlierCount} more earlier action${earlierCount === 1 ? '' : 's'} can still be undone after this.)`}
+            </MessageBar>
+          );
+        })()}
 
         <Pivot
           className={styles.mainTabs}
