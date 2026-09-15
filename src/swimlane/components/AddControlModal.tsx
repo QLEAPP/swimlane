@@ -1,12 +1,15 @@
 import * as React from 'react';
-import { Modal, PrimaryButton, DefaultButton, TextField } from '@fluentui/react';
+import { Modal, PrimaryButton, DefaultButton, TextField, ComboBox, IComboBoxOption } from '@fluentui/react';
 import { IControlStatement } from '../models/IControlStatement';
+import { IRiskStatement } from '../models/IRiskStatement';
 import { IDataService } from '../services/IDataService';
 import styles from './AddHierarchyShellModal.module.scss';
 
 export interface IAddControlModalProps {
   isOpen: boolean;
   dataService: IDataService;
+  controlStatements: IControlStatement[];
+  riskStatements: IRiskStatement[];
   onDismiss: () => void;
   onCreated: (created: IControlStatement) => void;
 }
@@ -16,7 +19,7 @@ export interface IAddControlModalProps {
 // Link Key is deliberately NOT a field here - it's set afterward via
 // ControlLinkPicker when the control is actually tied to a step, not
 // guessed/typed at creation time.
-const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService, onDismiss, onCreated }) => {
+const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService, controlStatements, riskStatements, onDismiss, onCreated }) => {
   const [controlId, setControlId] = React.useState('');
   const [riskId, setRiskId] = React.useState('');
   const [riskStatement, setRiskStatement] = React.useState('');
@@ -56,6 +59,16 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
       setError(undefined);
     }
   }, [isOpen]);
+
+  // Same list ControlLinkPicker's own "create a new control" Function
+  // field draws from - pulls from both registers, not just Control
+  // Register's own (usually sparser), so there's more to pick from.
+  const functionOptions: IComboBoxOption[] = React.useMemo(
+    () => Array.from(new Set([...controlStatements.map(c => c.function), ...riskStatements.map(r => r.function)].filter(Boolean)))
+      .sort()
+      .map(f => ({ key: f, text: f })),
+    [controlStatements, riskStatements]
+  );
 
   const trimmedDescription = controlDescription.trim();
   const canSubmit = trimmedDescription.length > 0 && !saving;
@@ -119,7 +132,15 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
       <TextField label="Status" placeholder="e.g. Active" value={status} onChange={(_e, v) => setStatus(v || '')} />
       <TextField label="Design effective?" placeholder="e.g. Yes" value={designEffective} onChange={(_e, v) => setDesignEffective(v || '')} />
       <TextField label="Operating effective?" placeholder="e.g. Yes" value={operatingEffective} onChange={(_e, v) => setOperatingEffective(v || '')} />
-      <TextField label="Function" placeholder="e.g. Finance" value={controlFunction} onChange={(_e, v) => setControlFunction(v || '')} />
+      <ComboBox
+        label="Function"
+        placeholder={functionOptions.length === 0 ? 'No functions in use yet' : 'Choose from the list...'}
+        selectedKey={controlFunction || null}
+        options={functionOptions}
+        autoComplete="on"
+        disabled={functionOptions.length === 0}
+        onChange={(_e, option) => setControlFunction(option ? String(option.key) : '')}
+      />
       <TextField
         label="Mapping notes"
         placeholder="Optional notes"

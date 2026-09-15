@@ -264,12 +264,15 @@ const ControlLinkPicker: React.FC<IControlLinkPickerProps> = ({
               {creatingError && <p className={styles.empty}>{creatingError}</p>}
               <ComboBox
                 label="Function"
-                placeholder="Choose from the list, or type your own..."
-                text={newFunction}
-                allowFreeform
+                placeholder="Choose from the list..."
+                selectedKey={newFunction || null}
                 autoComplete="on"
                 options={newFunctionOptions}
-                onChange={(_e, option, _index, freeformValue) => setNewFunction(option ? String(option.key) : (freeformValue || ''))}
+                // No allowFreeform (removed at the user's request) - must
+                // pick a real, already-in-use Function rather than typing
+                // a new one here, same "come from the list" constraint as
+                // Risk Owner (see EmployeePicker).
+                onChange={(_e, option) => setNewFunction(option ? String(option.key) : '')}
               />
               <p className={styles.empty}>Process: {processDescription || '(unnamed process)'}</p>
               <TextField

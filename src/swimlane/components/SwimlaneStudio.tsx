@@ -982,6 +982,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       <AddControlModal
         isOpen={addControlOpen}
         dataService={dataService}
+        controlStatements={controlStatements}
+        riskStatements={riskStatements}
         onDismiss={() => setAddControlOpen(false)}
         onCreated={handleControlCreated}
       />
