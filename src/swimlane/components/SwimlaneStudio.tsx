@@ -145,14 +145,22 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [backfillMessage, setBackfillMessage] = React.useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = React.useState<{ level: 'category' | 'processGroup' | 'processId'; id: string; currentLabel: string } | undefined>(undefined);
   const [renameValue, setRenameValue] = React.useState('');
-  // Separate from renameTarget/renameValue above - a section's name isn't
-  // a label-list row the way Category/Process Group/Process ID are, it
-  // lives on real step rows (see the comment on ProcessStepTabs'
-  // onRenameSection), so saving it means a bulk updateProcessStep across
+  // Separate from renameTarget/renameValue above - a section isn't a
+  // label-list row the way Category/Process Group/Process ID are, it's
+  // real step rows (see the comment on ProcessStepTabs'
+  // onRenameSection), so saving means a bulk updateProcessStep across
   // every step sharing that Process Step ID, not an add/update against a
-  // labels list.
+  // labels list. Renumbering (editing the ID itself, not just the name)
+  // and deleting the whole section added 2026-09-15 at the user's
+  // request ("why can't I just delete a section or edit it including
+  // numbering") - renameSectionId holds the ID field's current draft
+  // value separately from renameSectionTarget.processStepId (the
+  // ORIGINAL id being edited, needed to find which steps to update/
+  // delete regardless of what the id field is edited to).
   const [renameSectionTarget, setRenameSectionTarget] = React.useState<{ processStepId: string; currentName: string } | undefined>(undefined);
+  const [renameSectionId, setRenameSectionId] = React.useState('');
   const [renameSectionValue, setRenameSectionValue] = React.useState('');
+  const [deleteSectionConfirmOpen, setDeleteSectionConfirmOpen] = React.useState(false);
   // Which lock dialog is open, if any, and the reason text being typed
   // into it - 'lock' and 'unlock' share one dialog/one reason field since
   // they're never open at the same time.
@@ -665,22 +673,65 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
 
   const openRenameSection = (processStepId: string, currentName: string): void => {
     setRenameSectionTarget({ processStepId, currentName });
+    setRenameSectionId(processStepId);
     setRenameSectionValue(currentName);
+    setDeleteSectionConfirmOpen(false);
   };
 
-  // A section's name lives on every real step row sharing its Process
-  // Step ID (see the comment on ProcessStepTabs' onRenameSection), so
-  // saving means updating ALL of them at once, not one label-list row the
-  // way Category/Process Group/Process ID renames do.
+  const trimmedRenameSectionId = renameSectionId.trim();
+  // Renumbering stays within the same Process ID (first 3 segments locked)
+  // - reassigning a section to an entirely different process is enough of
+  // a different operation (it'd mean re-deriving apqcTitle/
+  // processDescription too) that it's out of scope here; same 4-segment
+  // format AddStepSectionModal itself validates against.
+  const renameSectionIdLooksValid = renameSectionTarget
+    ? new RegExp(`^${renameSectionTarget.processStepId.split('.').slice(0, 3).join('\\.')}\\.\\d+$`).test(trimmedRenameSectionId)
+    : false;
+  // A different, ALREADY-EXISTING section (not this one being renumbered)
+  // already using the target ID - blocked rather than silently merging
+  // two sections' steps together under one ID.
+  const renameSectionIdCollides = !!renameSectionTarget
+    && trimmedRenameSectionId !== renameSectionTarget.processStepId
+    && steps.some(s => s.processStepId === trimmedRenameSectionId);
+
+  // A section's name and ID both live on every real step row sharing its
+  // Process Step ID (see the comment on ProcessStepTabs' onRenameSection),
+  // so saving means updating ALL of them at once, not one label-list row
+  // the way Category/Process Group/Process ID renames do.
   const handleRenameSectionSave = (): void => {
     if (!renameSectionTarget) return;
-    const trimmed = renameSectionValue.trim();
-    if (!trimmed) return;
-    const affected = steps.filter(s => s.processStepId === renameSectionTarget.processStepId);
-    setSteps(prev => prev.map(s => (s.processStepId === renameSectionTarget.processStepId ? { ...s, processStepName: trimmed } : s)));
+    const trimmedName = renameSectionValue.trim();
+    if (!trimmedName || !renameSectionIdLooksValid || renameSectionIdCollides) return;
+    const oldId = renameSectionTarget.processStepId;
+    const newId = trimmedRenameSectionId;
+    const affected = steps.filter(s => s.processStepId === oldId);
+    setSteps(prev => prev.map(s => (s.processStepId === oldId ? { ...s, processStepId: newId, processStepName: trimmedName } : s)));
     affected.forEach(step => {
-      dataService.updateProcessStep({ ...step, processStepName: trimmed }).catch((err: Error) => setError(err.message));
+      dataService.updateProcessStep({ ...step, processStepId: newId, processStepName: trimmedName }).catch((err: Error) => setError(err.message));
     });
+    // The renumbered section's own tab needs to still be "selected" under
+    // its new ID, and any DependsOn picker option keyed on the old
+    // Process Step ID text needs to follow it too - both derive fresh
+    // from `steps` already updated above, this just keeps the currently
+    // open tab from silently pointing at an ID that no longer exists.
+    if (drilledDownStepId === oldId) setDrilledDownStepId(newId);
+    setRenameSectionTarget(undefined);
+  };
+
+  // Deletes every step sharing this Process Step ID - the whole section,
+  // not just the one row the small trash icon on an individual step
+  // already covers. Same "keep whatever local removal already happened"
+  // pattern as handleBulkDelete.
+  const handleDeleteSectionConfirm = (): void => {
+    if (!renameSectionTarget) return;
+    const targetId = renameSectionTarget.processStepId;
+    const idsToDelete = steps.filter(s => s.processStepId === targetId).map(s => s.id);
+    setSteps(prev => prev.filter(s => !idsToDelete.includes(s.id)));
+    idsToDelete.forEach(id => {
+      dataService.deleteProcessStep(id).catch((err: Error) => setError(err.message));
+    });
+    if (drilledDownStepId === targetId) setDrilledDownStepId(undefined);
+    setDeleteSectionConfirmOpen(false);
     setRenameSectionTarget(undefined);
   };
 
@@ -1093,8 +1144,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       <Dialog
         hidden={!renameSectionTarget}
         onDismiss={() => setRenameSectionTarget(undefined)}
-        dialogContentProps={{ type: DialogType.normal, title: `Rename ${renameSectionTarget?.processStepId || ''}` }}
+        dialogContentProps={{ type: DialogType.normal, title: `Edit section ${renameSectionTarget?.processStepId || ''}` }}
       >
+        <TextField
+          label="Process Step ID"
+          value={renameSectionId}
+          onChange={(_e, v) => setRenameSectionId(v || '')}
+          errorMessage={
+            trimmedRenameSectionId.length > 0 && !renameSectionIdLooksValid
+              ? `Needs exactly 4 dot-separated numbers under ${renameSectionTarget?.processStepId.split('.').slice(0, 3).join('.')}`
+              : renameSectionIdCollides
+                ? `${trimmedRenameSectionId} is already used by another section`
+                : undefined
+          }
+        />
         <TextField
           label="Section name"
           value={renameSectionValue}
@@ -1102,8 +1165,36 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           onKeyDown={e => { if (e.key === 'Enter') handleRenameSectionSave(); }}
         />
         <DialogFooter>
+          <DefaultButton
+            text="Delete section"
+            onClick={() => setDeleteSectionConfirmOpen(true)}
+            styles={{ root: { color: 'var(--risk-high)', borderColor: 'var(--risk-high)' } }}
+          />
           <DefaultButton text="Cancel" onClick={() => setRenameSectionTarget(undefined)} />
-          <PrimaryButton text="Save" onClick={handleRenameSectionSave} disabled={!renameSectionValue.trim()} />
+          <PrimaryButton
+            text="Save"
+            onClick={handleRenameSectionSave}
+            disabled={!renameSectionValue.trim() || !renameSectionIdLooksValid || renameSectionIdCollides}
+          />
+        </DialogFooter>
+      </Dialog>
+
+      <Dialog
+        hidden={!deleteSectionConfirmOpen}
+        onDismiss={() => setDeleteSectionConfirmOpen(false)}
+        dialogContentProps={{
+          type: DialogType.normal,
+          title: `Delete section ${renameSectionTarget?.processStepId || ''}?`,
+          subText: `Deletes all ${steps.filter(s => s.processStepId === renameSectionTarget?.processStepId).length} step(s) in this section. This can't be undone.`
+        }}
+      >
+        <DialogFooter>
+          <DefaultButton text="Cancel" onClick={() => setDeleteSectionConfirmOpen(false)} />
+          <PrimaryButton
+            text="Delete section"
+            onClick={handleDeleteSectionConfirm}
+            styles={{ root: { background: 'var(--risk-high)', border: 'none' }, rootHovered: { background: '#b02419' } }}
+          />
         </DialogFooter>
       </Dialog>
 
