@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Dropdown, IDropdownOption, ComboBox, IComboBoxOption, TextField, DefaultButton, PrimaryButton, IconButton } from '@fluentui/react';
 import { IControlStatement } from '../models/IControlStatement';
-import { IRiskStatement } from '../models/IRiskStatement';
+import { IRiskStatement, GUARANTEED_FUNCTIONS } from '../models/IRiskStatement';
 import { IDataService } from '../services/IDataService';
 import styles from './RiskLinkPicker.module.scss';
 
@@ -71,7 +71,7 @@ const ControlLinkPicker: React.FC<IControlLinkPickerProps> = ({
   );
 
   const functionOptions: IDropdownOption[] = React.useMemo(
-    () => Array.from(new Set(controlStatements.map(c => c.function).filter(Boolean))).sort().map(f => ({ key: f, text: f })),
+    () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...controlStatements.map(c => c.function)].filter(Boolean))).sort().map(f => ({ key: f, text: f })),
     [controlStatements]
   );
 
@@ -89,7 +89,7 @@ const ControlLinkPicker: React.FC<IControlLinkPickerProps> = ({
   // this feature existed) - Risk's Function values are the same
   // vocabulary and there's more of them to draw on.
   const newFunctionOptions: IComboBoxOption[] = React.useMemo(
-    () => Array.from(new Set([...controlStatements.map(c => c.function), ...riskStatements.map(r => r.function)].filter(Boolean)))
+    () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...controlStatements.map(c => c.function), ...riskStatements.map(r => r.function)].filter(Boolean)))
       .sort()
       .map(f => ({ key: f, text: f })),
     [controlStatements, riskStatements]

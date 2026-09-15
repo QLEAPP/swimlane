@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Dropdown, IDropdownOption, DefaultButton, IconButton } from '@fluentui/react';
-import { IRiskStatement, IRiskLink, RiskLevel } from '../models/IRiskStatement';
+import { IRiskStatement, IRiskLink, RiskLevel, GUARANTEED_FUNCTIONS } from '../models/IRiskStatement';
 import styles from './RiskLinkPicker.module.scss';
 
 export interface IRiskLinkPickerProps {
@@ -39,7 +39,7 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
   const risksById = React.useMemo(() => new Map(riskStatements.map(r => [r.id, r])), [riskStatements]);
 
   const functionOptions: IDropdownOption[] = React.useMemo(
-    () => Array.from(new Set(riskStatements.map(r => r.function).filter(Boolean))).sort().map(f => ({ key: f, text: f })),
+    () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...riskStatements.map(r => r.function)].filter(Boolean))).sort().map(f => ({ key: f, text: f })),
     [riskStatements]
   );
 

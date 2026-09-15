@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Modal, PrimaryButton, DefaultButton, TextField, ComboBox, IComboBoxOption } from '@fluentui/react';
 import { IControlStatement } from '../models/IControlStatement';
-import { IRiskStatement } from '../models/IRiskStatement';
+import { IRiskStatement, GUARANTEED_FUNCTIONS } from '../models/IRiskStatement';
 import { IDataService } from '../services/IDataService';
 import styles from './AddHierarchyShellModal.module.scss';
 
@@ -64,7 +64,7 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
   // field draws from - pulls from both registers, not just Control
   // Register's own (usually sparser), so there's more to pick from.
   const functionOptions: IComboBoxOption[] = React.useMemo(
-    () => Array.from(new Set([...controlStatements.map(c => c.function), ...riskStatements.map(r => r.function)].filter(Boolean)))
+    () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...controlStatements.map(c => c.function), ...riskStatements.map(r => r.function)].filter(Boolean)))
       .sort()
       .map(f => ({ key: f, text: f })),
     [controlStatements, riskStatements]

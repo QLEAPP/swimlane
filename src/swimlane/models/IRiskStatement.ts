@@ -1,5 +1,13 @@
 export type RiskLevel = 'High' | 'Medium' | 'Low';
 
+// "Function" (see IRiskStatement.function/IControlStatement.function
+// below) has no fixed list of its own - every Function picker in the app
+// just offers whatever values already exist on real Risk/Control rows.
+// "Operations" is guaranteed to always appear there too (added 2026-09-15
+// at the user's request), even before any real row uses it - every
+// Function picker mixes this in alongside the real, data-derived values.
+export const GUARANTEED_FUNCTIONS = ['Operations'];
+
 /**
  * The real "risk register data" SharePoint list - confirmed columns as of
  * 2026-08-17 from a live screenshot of the list: Risk ID, Category, Risk
