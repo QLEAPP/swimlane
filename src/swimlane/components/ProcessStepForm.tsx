@@ -23,6 +23,7 @@ export interface IProcessStepFormValue {
   linkedRisks: IRiskLink[];
   sopLink: string;
   delegationOfAuthorityLink: string;
+  notes: string;
 }
 
 export const SHAPE_OPTIONS: IDropdownOption[] = [
@@ -152,6 +153,14 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
         dataService={dataService}
         onLinked={onControlLinked}
         onCreated={onControlCreated}
+      />
+      <TextField
+        label="Notes"
+        placeholder="Any additional context for this step"
+        value={value.notes}
+        onChange={(_e, v) => set('notes', v || '')}
+        multiline
+        rows={2}
       />
       <OptionalLinkField
         label="SOP / guidance link"

@@ -267,6 +267,10 @@ export class GraphDataService implements IDataService {
       // Master File list (single line of text) - see the schema comment
       // on IProcessStep.uniqueId.
       uniqueId: get(item, 'Unique ID') || undefined,
+      // CONFIRMED 2026-09-15 - "Notes" column created by the user on the
+      // real Master File list (Multiple lines of text) - see the schema
+      // comment on IProcessStep.notes.
+      notes: get(item, 'Notes') || undefined,
       // Native SharePoint item metadata, not a custom column - see the
       // GraphItem type comment and IProcessStep.createdBy for why.
       createdBy: GraphDataService._identityName(item.createdBy),
@@ -731,6 +735,7 @@ export class GraphDataService implements IDataService {
     set('Edge Labels', serializeEdgeLabels(step.edgeLabels));
     set('SOP Link', step.sopLink || '');
     set('Delegation of Authority Link', step.delegationOfAuthorityLink || '');
+    set('Notes', step.notes || '');
     set('Unique ID', uniqueId);
 
     const created = await this._graph.post<GraphItem>(`/sites/${siteId}/lists/${listId}/items`, { fields });
@@ -805,6 +810,7 @@ export class GraphDataService implements IDataService {
     set('Edge Labels', serializeEdgeLabels(step.edgeLabels));
     set('SOP Link', step.sopLink || '');
     set('Delegation of Authority Link', step.delegationOfAuthorityLink || '');
+    set('Notes', step.notes || '');
 
     await this._graph.patch(`/sites/${siteId}/lists/${listId}/items/${step.id}/fields`, fields);
   }

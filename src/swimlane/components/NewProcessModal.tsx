@@ -43,7 +43,8 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
   dependsOnStepIds: [],
   linkedRisks: [],
   sopLink: '',
-  delegationOfAuthorityLink: ''
+  delegationOfAuthorityLink: '',
+  notes: ''
 });
 
 // Every other way of getting a step into the app (Add a step, CSV import)

@@ -80,6 +80,13 @@ export interface IProcessStep {
   // nextUniqueId below) at creation, never user-edited, so
   // updateProcessStep deliberately never touches this field.
   uniqueId?: string;
+  // "Notes" column added 2026-09-15 at the user's request - CONFIRMED
+  // real column, created by the user themselves on the real Master File
+  // list (Multiple lines of text). Free-text, unlike sopLink/
+  // delegationOfAuthorityLink above there's no separate "+ Add" reveal -
+  // shown as a plain field in the step form since a note doesn't carry
+  // the same rare/optional feel a reference link does.
+  notes?: string;
 }
 
 /**

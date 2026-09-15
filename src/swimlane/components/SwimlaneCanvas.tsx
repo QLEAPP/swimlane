@@ -676,7 +676,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       dependsOnStepIds: dependsOnTokensToStepIds(allSteps, step.dependsOn),
       linkedRisks: step.linkedRisks || [],
       sopLink: step.sopLink || '',
-      delegationOfAuthorityLink: step.delegationOfAuthorityLink || ''
+      delegationOfAuthorityLink: step.delegationOfAuthorityLink || '',
+      notes: step.notes || ''
     });
   };
 
