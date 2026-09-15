@@ -3,7 +3,7 @@ import { IDataService, IBulkAddStepsResult } from './IDataService';
 import { IProcessStep, parseDependsOn, parseEdgeLabels, serializeEdgeLabels, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, parseLinkedRisks, serializeLinkedRisks } from '../models/IRiskStatement';
-import { IControlStatement } from '../models/IControlStatement';
+import { IControlStatement, nextControlId } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -408,12 +408,16 @@ export class GraphDataService implements IDataService {
     const siteId = await this._resolveSiteId();
     const listId = await this._resolveListId(CONTROL_LIST_TITLE);
 
+    // Computed fresh against the current list right before creating - same
+    // approach as GraphDataService.addRiskStatement's own nextRiskId call.
+    const controlId = nextControlId(await this.getControlStatements());
+
     const fields: Record<string, string> = {};
     const set = (displayName: string, value: string | undefined): void => {
       const internalName = fieldMap[displayName];
       if (internalName && value !== undefined && value !== '') fields[internalName] = value;
     };
-    set('Control ID', control.controlId);
+    set('Control ID', controlId);
     set('Risk ID', control.riskId);
     set('Risk Statement', control.riskStatement);
     set('Control Description', control.controlDescription);
@@ -430,7 +434,7 @@ export class GraphDataService implements IDataService {
     set('Mapping Notes', control.mappingNotes);
 
     const created = await this._graph.post<GraphItem>(`/sites/${siteId}/lists/${listId}/items`, { fields });
-    return { ...control, id: created.id };
+    return { ...control, controlId, id: created.id };
   }
 
   // The one mutation Control linking ever makes - see the interface

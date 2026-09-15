@@ -48,3 +48,21 @@ export interface IControlStatement {
   linkKey: string; // "Link Key" - see interface comment above; '' means not linked to any step
   mappingNotes: string;
 }
+
+/**
+ * Auto-generates the next Control ID for a NEWLY created control (e.g.
+ * "CTL-003" following "CTL-002") - added 2026-09-15 at the user's request,
+ * same reasoning and pattern as nextRiskId in IRiskStatement.ts: a real,
+ * unique, system-assigned ID rather than one someone could mistype, leave
+ * blank, or collide with another row. No Category-like field exists on
+ * Control to derive a varying prefix from the way Risk ID's does, so this
+ * is one flat "CTL-" sequence rather than several scoped ones.
+ */
+export function nextControlId(controls: Array<{ controlId: string }>): string {
+  const pattern = /^CTL-(\d+)$/;
+  const max = controls.reduce((acc, c) => {
+    const match = pattern.exec((c.controlId || '').trim());
+    return match ? Math.max(acc, parseInt(match[1], 10)) : acc;
+  }, 0);
+  return `CTL-${String(max + 1).padStart(3, '0')}`;
+}

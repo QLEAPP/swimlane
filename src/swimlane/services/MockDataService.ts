@@ -2,7 +2,7 @@
 import { IProcessStep, parseDependsOn, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, parseLinkedRisks } from '../models/IRiskStatement';
-import { IControlStatement } from '../models/IControlStatement';
+import { IControlStatement, nextControlId } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -225,7 +225,8 @@ export class MockDataService implements IDataService {
   }
 
   public addControlStatement(control: Omit<IControlStatement, 'id'>): Promise<IControlStatement> {
-    const created: IControlStatement = { ...control, id: `mock-control-${this._controls.length + 1}` };
+    const controlId = nextControlId(this._controls);
+    const created: IControlStatement = { ...control, controlId, id: `mock-control-${this._controls.length + 1}` };
     this._controls.push(created);
     return Promise.resolve(created);
   }
