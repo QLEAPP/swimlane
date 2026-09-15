@@ -4,7 +4,9 @@ import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { IProcessStep, getShapeType } from '../models/IProcessStep';
 import { IRiskStatement, worstLinkedSeverity } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IEmployee } from '../models/IEmployee';
+import { IDataService } from '../services/IDataService';
 import { SwimlaneStage } from '../models/ISwimlaneStatus';
 import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions } from '../utils/dependencyResolution';
 import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder } from '../utils/columns';
@@ -24,6 +26,11 @@ export interface ISwimlaneCanvasProps {
   swimlaneSteps: IProcessStep[];
   edges: IResolvedEdge[]; // resolved against the FULL, unfiltered dataset (row numbers only make sense that way) - this component only draws the ones whose endpoints are currently rendered
   riskStatements: IRiskStatement[]; // drives each shape's traffic-light fill when linked to a step
+  controlStatements: IControlStatement[];
+  processDescription: string; // this Process ID's own name - see ControlLinkPicker's "create a new control" section
+  dataService: IDataService; // ControlLinkPicker writes straight to Control Register (see setControlLinkKey) - needs direct access, not staged via onEditStep like everything else in the edit panel
+  onControlLinked: (updated: IControlStatement) => void;
+  onControlCreated: (created: IControlStatement) => void;
   drilledDownStepId: string | undefined;
   employees: IEmployee[];
   // True while the swimlane currently on screen is locked (see
@@ -95,8 +102,9 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // each box actually faces the other node, so lines don't cut diagonally
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
-  steps, allSteps, swimlaneSteps, edges, riskStatements, drilledDownStepId, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep,
-  onCreateStep, autoOpenStepId, onAutoOpenHandled, swimlaneStage, stageSetBy, onToggleStage
+  steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated,
+  drilledDownStepId, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, autoOpenStepId, onAutoOpenHandled,
+  swimlaneStage, stageSetBy, onToggleStage
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
   const svgRef = React.useRef<SVGSVGElement>(null);
@@ -1023,6 +1031,12 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 employees={employees}
                 dependsOnOptions={dependsOnOptions}
                 riskStatements={riskStatements}
+                controlStatements={controlStatements}
+                processStepId={(selectedNodeId && stepsById.get(selectedNodeId)?.processStepId) || ''}
+                processDescription={processDescription}
+                dataService={dataService}
+                onControlLinked={onControlLinked}
+                onControlCreated={onControlCreated}
               />
               <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked} />
             </div>

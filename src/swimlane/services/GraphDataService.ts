@@ -3,6 +3,7 @@ import { IDataService, IBulkAddStepsResult } from './IDataService';
 import { IProcessStep, parseDependsOn, parseEdgeLabels, serializeEdgeLabels, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, parseLinkedRisks, serializeLinkedRisks } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -35,6 +36,13 @@ const EMPLOYEES_LIST_TITLE = 'QLE Existing Organisation';
 // register the app reads from, not one it owns - see the schema comment in
 // models/IRiskStatement.ts.
 const RISK_LIST_TITLE = 'risk register data';
+// TODO-CONFIRM exact display name/capitalization - given directly by the
+// user 2026-09-08 as "Control Register" but not yet cross-checked against
+// a live screenshot the way RISK_LIST_TITLE's original columns were. If
+// the real title differs, _resolveListId throws a clear error listing the
+// real lists found on the site - update this constant to match. Columns:
+// see the schema comment in models/IControlStatement.ts.
+const CONTROL_LIST_TITLE = 'Control Register';
 // CONFIRMED 2026-08-17 - created on the real "Swimlane Studio" site with
 // the built-in Title column (group name) plus a single line of text
 // column "Group ID". Stores names for Process Groups the static
@@ -356,6 +364,82 @@ export class GraphDataService implements IDataService {
 
     const created = await this._graph.post<GraphItem>(`/sites/${siteId}/lists/${listId}/items`, { fields });
     return { ...risk, id: created.id };
+  }
+
+  public async getControlStatements(): Promise<IControlStatement[]> {
+    const fieldMap = await this._resolveFieldMap(CONTROL_LIST_TITLE);
+    const items = await this._getItems(CONTROL_LIST_TITLE);
+    // eslint-disable-next-line no-console
+    console.log(`[SwimlaneStudio] "${CONTROL_LIST_TITLE}" live row count: ${items.length} - confirm this matches the list in SharePoint.`);
+
+    const get = (item: GraphItem, displayName: string): string => GraphDataService._get(item, fieldMap, displayName);
+
+    return items.map((item): IControlStatement => ({
+      id: item.id,
+      controlId: get(item, 'Control ID'),
+      riskId: get(item, 'Risk ID'),
+      riskStatement: get(item, 'Risk Statement'),
+      controlDescription: get(item, 'Control Description'),
+      controlOwner: get(item, 'Control Owner'),
+      controlType: get(item, 'Control Type'),
+      executionMethod: get(item, 'Execution Method'),
+      frequency: get(item, 'Frequency'),
+      evidence: get(item, 'Evidence'),
+      status: get(item, 'Status'),
+      designEffective: get(item, 'Design Effective?'),
+      operatingEffective: get(item, 'Operating Effective?'),
+      function: get(item, 'Function'),
+      linkKey: get(item, 'Link Key'),
+      mappingNotes: get(item, 'Mapping Notes')
+    }));
+  }
+
+  // Writes directly into "Control Register" - see the interface comment
+  // on IDataService.addControlStatement for why that's a deliberate,
+  // explicitly-confirmed choice despite the list otherwise being a
+  // standing enterprise register this app doesn't own. Every column
+  // getControlStatements reads is set here too, nothing more.
+  public async addControlStatement(control: Omit<IControlStatement, 'id'>): Promise<IControlStatement> {
+    const fieldMap = await this._resolveFieldMap(CONTROL_LIST_TITLE);
+    const siteId = await this._resolveSiteId();
+    const listId = await this._resolveListId(CONTROL_LIST_TITLE);
+
+    const fields: Record<string, string> = {};
+    const set = (displayName: string, value: string | undefined): void => {
+      const internalName = fieldMap[displayName];
+      if (internalName && value !== undefined && value !== '') fields[internalName] = value;
+    };
+    set('Control ID', control.controlId);
+    set('Risk ID', control.riskId);
+    set('Risk Statement', control.riskStatement);
+    set('Control Description', control.controlDescription);
+    set('Control Owner', control.controlOwner);
+    set('Control Type', control.controlType);
+    set('Execution Method', control.executionMethod);
+    set('Frequency', control.frequency);
+    set('Evidence', control.evidence);
+    set('Status', control.status);
+    set('Design Effective?', control.designEffective);
+    set('Operating Effective?', control.operatingEffective);
+    set('Function', control.function);
+    set('Link Key', control.linkKey);
+    set('Mapping Notes', control.mappingNotes);
+
+    const created = await this._graph.post<GraphItem>(`/sites/${siteId}/lists/${listId}/items`, { fields });
+    return { ...control, id: created.id };
+  }
+
+  // The one mutation Control linking ever makes - see the interface
+  // comment on IDataService.setControlLinkKey. Same single-field PATCH
+  // pattern as updateCategoryLabel below, just against Control Register's
+  // own Link Key column instead.
+  public async setControlLinkKey(controlId: string, processStepId: string): Promise<void> {
+    const fieldMap = await this._resolveFieldMap(CONTROL_LIST_TITLE);
+    const siteId = await this._resolveSiteId();
+    const listId = await this._resolveListId(CONTROL_LIST_TITLE);
+    const linkKeyField = fieldMap['Link Key'];
+    if (!linkKeyField) return;
+    await this._graph.patch(`/sites/${siteId}/lists/${listId}/items/${controlId}/fields`, { [linkKeyField]: processStepId });
   }
 
   public async getCategoryLabels(): Promise<ICategoryLabel[]> {

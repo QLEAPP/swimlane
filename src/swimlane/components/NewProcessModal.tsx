@@ -3,6 +3,7 @@ import { Modal, PrimaryButton, DefaultButton, TextField, MessageBar, MessageBarT
 import { IProcessStep } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { IDataService } from '../services/IDataService';
 import { getCategoryId, getProcessGroupId, getCategoryName, getProcessGroupName } from '../utils/apqcHierarchy';
@@ -16,6 +17,7 @@ export interface INewProcessModalProps {
   steps: IProcessStep[];
   employees: IEmployee[];
   riskStatements: IRiskStatement[];
+  controlStatements: IControlStatement[];
   dataService: IDataService;
   // Wherever the user opened this from (a category or process group
   // already drilled into) - prefills the Process Step ID so continuing
@@ -28,6 +30,8 @@ export interface INewProcessModalProps {
   onDismiss: () => void;
   onCreated: (created: IProcessStep) => void;
   onGroupLabelCreated: (created: IProcessGroupLabel) => void;
+  onControlLinked: (updated: IControlStatement) => void;
+  onControlCreated: (created: IControlStatement) => void;
 }
 
 const emptyStepDraft = (): IProcessStepFormValue => ({
@@ -49,8 +53,8 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
 // new area needs (Process Step ID plus the two labels nothing else can
 // infer) and otherwise reuses the same ProcessStepForm as everywhere else.
 const NewProcessModal: React.FC<INewProcessModalProps> = ({
-  isOpen, steps, employees, riskStatements, dataService, processStepIdPrefix, knownProcessGroupIds,
-  onDismiss, onCreated, onGroupLabelCreated
+  isOpen, steps, employees, riskStatements, controlStatements, dataService, processStepIdPrefix, knownProcessGroupIds,
+  onDismiss, onCreated, onGroupLabelCreated, onControlLinked, onControlCreated
 }) => {
   const [processStepId, setProcessStepId] = React.useState('');
   const [processGroupName, setProcessGroupName] = React.useState('');
@@ -181,6 +185,12 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         employees={employees}
         dependsOnOptions={dependsOnOptions}
         riskStatements={riskStatements}
+        controlStatements={controlStatements}
+        processStepId={trimmedId}
+        processDescription={processDescription}
+        dataService={dataService}
+        onControlLinked={onControlLinked}
+        onControlCreated={onControlCreated}
       />
 
       <div className={styles.footer}>

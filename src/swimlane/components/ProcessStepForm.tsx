@@ -2,8 +2,11 @@ import * as React from 'react';
 import { TextField, Dropdown, IDropdownOption, ComboBox, IComboBoxOption, Checkbox } from '@fluentui/react';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, IRiskLink } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
+import { IDataService } from '../services/IDataService';
 import EmployeePicker from './EmployeePicker';
 import RiskLinkPicker from './RiskLinkPicker';
+import ControlLinkPicker from './ControlLinkPicker';
 import OptionalLinkField from './OptionalLinkField';
 
 // The full set of fields a process step actually has - shared by the
@@ -50,9 +53,24 @@ export interface IProcessStepFormProps {
   employees: IEmployee[];
   dependsOnOptions: IDropdownOption[];
   riskStatements: IRiskStatement[];
+  controlStatements: IControlStatement[];
+  // The step's own Process Step ID - see ControlLinkPicker for why
+  // linking needs this directly rather than going through `value` the way
+  // linkedRisks does (Control linking writes straight to Control
+  // Register, there's no step-side array to hold it in).
+  processStepId: string;
+  // This Process ID's own name - see ControlLinkPicker for why the
+  // inline "create a new control" section needs it.
+  processDescription: string;
+  dataService: IDataService;
+  onControlLinked: (updated: IControlStatement) => void;
+  onControlCreated: (created: IControlStatement) => void;
 }
 
-const ProcessStepForm: React.FC<IProcessStepFormProps> = ({ value, onChange, employees, dependsOnOptions, riskStatements }) => {
+const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
+  value, onChange, employees, dependsOnOptions, riskStatements, controlStatements, processStepId, processDescription,
+  dataService, onControlLinked, onControlCreated
+}) => {
   const set = <K extends keyof IProcessStepFormValue>(key: K, v: IProcessStepFormValue[K]): void => {
     onChange({ ...value, [key]: v });
   };
@@ -125,6 +143,15 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({ value, onChange, emp
         riskStatements={riskStatements}
         value={value.linkedRisks}
         onChange={links => set('linkedRisks', links)}
+      />
+      <ControlLinkPicker
+        controlStatements={controlStatements}
+        riskStatements={riskStatements}
+        processStepId={processStepId}
+        processDescription={processDescription}
+        dataService={dataService}
+        onLinked={onControlLinked}
+        onCreated={onControlCreated}
       />
       <OptionalLinkField
         label="SOP / guidance link"

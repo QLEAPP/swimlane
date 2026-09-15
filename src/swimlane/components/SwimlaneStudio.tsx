@@ -8,6 +8,7 @@ import type { ISwimlaneStudioProps } from './ISwimlaneStudioProps';
 import { IProcessStep, getProcessId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -30,6 +31,8 @@ import EmployeesList from './EmployeesList';
 import AddEmployeeModal from './AddEmployeeModal';
 import AddRiskModal from './AddRiskModal';
 import RiskRegisterList from './RiskRegisterList';
+import AddControlModal from './AddControlModal';
+import ControlRegisterList from './ControlRegisterList';
 import AuditView from './AuditView';
 import ImprovementsView from './ImprovementsView';
 import SwimlaneComments from './SwimlaneComments';
@@ -42,7 +45,7 @@ import DuplicateRegionModal from './DuplicateRegionModal';
 import ProcessStepForm, { IProcessStepFormValue } from './ProcessStepForm';
 import qleLogo from '../../assets/qle-logo.svg';
 
-type MainTab = 'flows' | 'employees' | 'risks' | 'audit' | 'improvements';
+type MainTab = 'flows' | 'employees' | 'risks' | 'controls' | 'audit' | 'improvements';
 
 // Single-level undo (the last destructive action only, not a full stack) -
 // covers the three actions that lose data outright: deleting a step,
@@ -86,6 +89,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [steps, setSteps] = React.useState<IProcessStep[]>([]);
   const [employees, setEmployees] = React.useState<IEmployee[]>([]);
   const [riskStatements, setRiskStatements] = React.useState<IRiskStatement[]>([]);
+  const [controlStatements, setControlStatements] = React.useState<IControlStatement[]>([]);
   const [categoryLabels, setCategoryLabels] = React.useState<ICategoryLabel[]>([]);
   const [processGroupLabels, setProcessGroupLabels] = React.useState<IProcessGroupLabel[]>([]);
   const [processIdLabels, setProcessIdLabels] = React.useState<IProcessIdLabel[]>([]);
@@ -118,6 +122,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [newProcessOpen, setNewProcessOpen] = React.useState(false);
   const [addEmployeeOpen, setAddEmployeeOpen] = React.useState(false);
   const [addRiskOpen, setAddRiskOpen] = React.useState(false);
+  const [addControlOpen, setAddControlOpen] = React.useState(false);
   // The lightweight "just name and reserve an ID" flow (see
   // AddHierarchyShellModal) - separate from newProcessOpen, which is the
   // full "create a complete step" flow. idPrefix is the parent ID plus a
@@ -178,11 +183,11 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     setLoading(true);
     setError(undefined);
     Promise.allSettled([
-      dataService.getProcessSteps(), dataService.getEmployees(), dataService.getRiskStatements(),
+      dataService.getProcessSteps(), dataService.getEmployees(), dataService.getRiskStatements(), dataService.getControlStatements(),
       dataService.getCategoryLabels(), dataService.getProcessGroupLabels(), dataService.getProcessIdLabels(), dataService.getProcessIdLocks(),
       dataService.getSwimlaneComments(), dataService.getSwimlaneStatuses()
     ])
-      .then(([stepsResult, employeesResult, risksResult, categoryLabelsResult, groupLabelsResult, processIdLabelsResult, locksResult, commentsResult, statusesResult]) => {
+      .then(([stepsResult, employeesResult, risksResult, controlsResult, categoryLabelsResult, groupLabelsResult, processIdLabelsResult, locksResult, commentsResult, statusesResult]) => {
         const errors: string[] = [];
 
         if (stepsResult.status === 'fulfilled') {
@@ -201,6 +206,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           setRiskStatements(risksResult.value);
         } else {
           errors.push(`Risk statements: ${describeError(risksResult.reason)}`);
+        }
+
+        if (controlsResult.status === 'fulfilled') {
+          setControlStatements(controlsResult.value);
+        } else {
+          errors.push(`Control statements: ${describeError(controlsResult.reason)}`);
         }
 
         // Same "nice to have, not a blocking error" treatment as
@@ -321,6 +332,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     }
     return undefined;
   }, [drilledDownStepId, selectedProcessId, selectedProcessGroupId, selectedCategoryId, stepsInProcessId, customGroupNames, customProcessIdNames]);
+
+  // Same resolution as currentLevelName's own selectedProcessId branch,
+  // but WITHOUT the drilledDownStepId override - this always names the
+  // process itself (e.g. "Process accounts payable (AP)"), never a single
+  // step's own name, since it's used to pre-fill/suggest context when
+  // creating a new Control inline (see ControlLinkPicker) and to match
+  // against Risk Register's own "Process" column for narrowing which
+  // Risks are offered there.
+  const currentProcessDescription = React.useMemo(
+    () => selectedProcessId
+      ? customProcessIdNames[selectedProcessId] || stepsInProcessId[0]?.processDescription || getProcessIdName(selectedProcessId)
+      : '',
+    [selectedProcessId, stepsInProcessId, customProcessIdNames]
+  );
 
   // The lock currently in effect for the swimlane actually on screen right
   // now (this Process ID + this region), if any - undefined means it's
@@ -542,6 +567,19 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const handleRiskCreated = (created: IRiskStatement): void => {
     setRiskStatements(prev => [...prev, created]);
     setAddRiskOpen(false);
+  };
+
+  const handleControlCreated = (created: IControlStatement): void => {
+    setControlStatements(prev => [...prev, created]);
+    setAddControlOpen(false);
+  };
+
+  // Fires after ControlLinkPicker writes a link/unlink straight to Control
+  // Register (see setControlLinkKey) - keeps this list's local copy in
+  // sync without a full reload, same "hand up what actually happened"
+  // pattern as every other created/updated callback in this file.
+  const handleControlLinked = (updated: IControlStatement): void => {
+    setControlStatements(prev => prev.map(c => (c.id === updated.id ? updated : c)));
   };
 
   // Lands the user straight in the empty Category, Process Group, or
@@ -906,12 +944,15 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         steps={steps}
         employees={employees}
         riskStatements={riskStatements}
+        controlStatements={controlStatements}
         dataService={dataService}
         processStepIdPrefix={newProcessPrefix}
         knownProcessGroupIds={new Set([...Object.keys(APQC_PROCESS_GROUP_NAMES), ...Object.keys(customGroupNames)])}
         onDismiss={() => setNewProcessOpen(false)}
         onCreated={handleProcessCreated}
         onGroupLabelCreated={handleGroupLabelCreated}
+        onControlLinked={handleControlLinked}
+        onControlCreated={handleControlCreated}
       />
 
       <AddHierarchyShellModal
@@ -935,6 +976,13 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         dataService={dataService}
         onDismiss={() => setAddRiskOpen(false)}
         onCreated={handleRiskCreated}
+      />
+
+      <AddControlModal
+        isOpen={addControlOpen}
+        dataService={dataService}
+        onDismiss={() => setAddControlOpen(false)}
+        onCreated={handleControlCreated}
       />
 
       <AddStepSectionModal
@@ -1106,12 +1154,13 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           selectedKey={activeTab}
           onLinkClick={(item?: PivotItem) => {
             const key = item?.props.itemKey;
-            setActiveTab(key === 'employees' || key === 'risks' || key === 'audit' || key === 'improvements' ? key : 'flows');
+            setActiveTab(key === 'employees' || key === 'risks' || key === 'controls' || key === 'audit' || key === 'improvements' ? key : 'flows');
           }}
         >
           <PivotItem headerText="Process Flows" itemKey="flows" />
           <PivotItem headerText="Employees" itemKey="employees" />
           <PivotItem headerText="Risk Register" itemKey="risks" />
+          <PivotItem headerText="Control Register" itemKey="controls" />
           <PivotItem headerText="Audit" itemKey="audit" />
           <PivotItem headerText="Improvements" itemKey="improvements" />
         </Pivot>
@@ -1120,6 +1169,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           <EmployeesList employees={employees} onAddClick={() => setAddEmployeeOpen(true)} />
         ) : activeTab === 'risks' ? (
           <RiskRegisterList riskStatements={riskStatements} onAddClick={() => setAddRiskOpen(true)} />
+        ) : activeTab === 'controls' ? (
+          <ControlRegisterList controlStatements={controlStatements} onAddClick={() => setAddControlOpen(true)} />
         ) : activeTab === 'audit' ? (
           <>
             {/* TEMPORARY - see the interface comment on IDataService.backfillUniqueIds. */}
@@ -1285,6 +1336,11 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   swimlaneSteps={stepsInRegion}
                   edges={edges}
                   riskStatements={riskStatements}
+                  controlStatements={controlStatements}
+                  processDescription={currentProcessDescription}
+                  dataService={dataService}
+                  onControlLinked={handleControlLinked}
+                  onControlCreated={handleControlCreated}
                   drilledDownStepId={drilledDownStepId}
                   employees={employees}
                   isLocked={!!activeLock}
@@ -1317,6 +1373,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                         employees={employees}
                         dependsOnOptions={addStepDependsOnOptions}
                         riskStatements={riskStatements}
+                        controlStatements={controlStatements}
+                        processStepId={drilledDownStepId || selectedProcessId || ''}
+                        processDescription={currentProcessDescription}
+                        dataService={dataService}
+                        onControlLinked={handleControlLinked}
+                        onControlCreated={handleControlCreated}
                       />
                       <PrimaryButton
                         text={saving ? 'Adding...' : 'Add step'}

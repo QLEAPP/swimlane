@@ -2,6 +2,7 @@
 import { IProcessStep, parseDependsOn, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, parseLinkedRisks } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -126,6 +127,29 @@ const MOCK_RISKS: IRiskStatement[] = [
   }
 ];
 
+// Shaped like the real "Control Register" list (see the schema comment in
+// models/IControlStatement.ts). riskId here matches MOCK_RISKS' own "Risk
+// ID" text column (e.g. 'OP-014'), same textual match ControlLinkPicker
+// uses against real data. linkKey starts blank on all of these - nothing
+// pre-linked, so "link a control to a step" has real, unlinked controls to
+// pick from out of the box in mock mode.
+const MOCK_CONTROLS: IControlStatement[] = [
+  {
+    id: 'c1', controlId: 'CTL-014', riskId: 'OP-014', riskStatement: 'Same person creates and approves a purchase order.',
+    controlDescription: 'System enforces separation of duties between PO creation and approval roles.',
+    controlOwner: 'Finance Manager', controlType: 'Preventive', executionMethod: 'Automated', frequency: 'Continuous',
+    evidence: 'NetSuite role/permission report', status: 'Active',
+    designEffective: 'Yes', operatingEffective: 'Yes', function: 'Finance', linkKey: '', mappingNotes: ''
+  },
+  {
+    id: 'c2', controlId: 'CTL-021', riskId: 'OP-021', riskStatement: 'Payment released without required approval threshold met.',
+    controlDescription: 'Banking system approval limits reviewed monthly against delegation of authority.',
+    controlOwner: 'Finance Manager', controlType: 'Detective', executionMethod: 'Manual', frequency: 'Monthly',
+    evidence: 'Reconciliation checklist', status: 'Active',
+    designEffective: 'Yes', operatingEffective: 'No', function: 'Finance', linkKey: '', mappingNotes: ''
+  }
+];
+
 export class MockDataService implements IDataService {
   private _steps: IProcessStep[] = buildMockSteps();
   // Starts empty - the confirmed real Process Groups already live in
@@ -147,6 +171,11 @@ export class MockDataService implements IDataService {
   // Risks added at runtime via "+ Add risk" - kept separate from the
   // static MOCK_RISKS const, same layering reasoning as _addedEmployees.
   private _addedRisks: IRiskStatement[] = [];
+  // Controls, held as ONE mutable array (not split static/added like
+  // risks) - setControlLinkKey needs to mutate an existing row's Link Key
+  // in place, so the seed data can't be a read-only const the way
+  // MOCK_RISKS is.
+  private _controls: IControlStatement[] = MOCK_CONTROLS.slice();
   // Append-only audit trail - see IProcessIdLock. Starts empty; nothing
   // is locked until someone explicitly locks it.
   private _processIdLocks: IProcessIdLock[] = [];
@@ -189,6 +218,24 @@ export class MockDataService implements IDataService {
 
   public getRiskStatements(): Promise<IRiskStatement[]> {
     return Promise.resolve([...MOCK_RISKS, ...this._addedRisks]);
+  }
+
+  public getControlStatements(): Promise<IControlStatement[]> {
+    return Promise.resolve(this._controls.slice());
+  }
+
+  public addControlStatement(control: Omit<IControlStatement, 'id'>): Promise<IControlStatement> {
+    const created: IControlStatement = { ...control, id: `mock-control-${this._controls.length + 1}` };
+    this._controls.push(created);
+    return Promise.resolve(created);
+  }
+
+  public setControlLinkKey(controlId: string, processStepId: string): Promise<void> {
+    const index = this._controls.findIndex(c => c.id === controlId);
+    if (index >= 0) {
+      this._controls[index] = { ...this._controls[index], linkKey: processStepId };
+    }
+    return Promise.resolve();
   }
 
   public addRiskStatement(risk: Omit<IRiskStatement, 'id'>): Promise<IRiskStatement> {

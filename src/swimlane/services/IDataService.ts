@@ -1,6 +1,7 @@
 ﻿import { IProcessStep } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement } from '../models/IRiskStatement';
+import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
@@ -35,6 +36,19 @@ export interface IDataService {
   // Whoever owns that list should be aware rows can now originate from
   // this app too.
   addRiskStatement(risk: Omit<IRiskStatement, 'id'>): Promise<IRiskStatement>;
+  getControlStatements(): Promise<IControlStatement[]>;
+  // Writes a real new row into "Control Register" - same kind of
+  // explicit, deliberate exception as addRiskStatement above: that list
+  // is otherwise a standing enterprise register this app only reads from
+  // (see the schema comment on IControlStatement), not one it owns.
+  addControlStatement(control: Omit<IControlStatement, 'id'>): Promise<IControlStatement>;
+  // Sets (or, passed '', clears) a Control's own Link Key field - this IS
+  // the link between a Control and a step (see the schema comment on
+  // IControlStatement), so unlike Risk linking, this writes to Control
+  // Register itself rather than to anything on the Process Steps list.
+  // A Control can only ever point at one step at a time, since Link Key
+  // is a single value, not a list.
+  setControlLinkKey(controlId: string, processStepId: string): Promise<void>;
   getCategoryLabels(): Promise<ICategoryLabel[]>;
   addCategoryLabel(categoryId: string, name: string): Promise<ICategoryLabel>;
   // Renaming an existing custom label OR one of the 13 real, static APQC
