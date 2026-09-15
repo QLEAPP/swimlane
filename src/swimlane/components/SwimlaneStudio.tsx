@@ -145,6 +145,14 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [backfillMessage, setBackfillMessage] = React.useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = React.useState<{ level: 'category' | 'processGroup' | 'processId'; id: string; currentLabel: string } | undefined>(undefined);
   const [renameValue, setRenameValue] = React.useState('');
+  // Separate from renameTarget/renameValue above - a section's name isn't
+  // a label-list row the way Category/Process Group/Process ID are, it
+  // lives on real step rows (see the comment on ProcessStepTabs'
+  // onRenameSection), so saving it means a bulk updateProcessStep across
+  // every step sharing that Process Step ID, not an add/update against a
+  // labels list.
+  const [renameSectionTarget, setRenameSectionTarget] = React.useState<{ processStepId: string; currentName: string } | undefined>(undefined);
+  const [renameSectionValue, setRenameSectionValue] = React.useState('');
   // Which lock dialog is open, if any, and the reason text being typed
   // into it - 'lock' and 'unlock' share one dialog/one reason field since
   // they're never open at the same time.
@@ -655,6 +663,27 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     setRenameTarget(undefined);
   };
 
+  const openRenameSection = (processStepId: string, currentName: string): void => {
+    setRenameSectionTarget({ processStepId, currentName });
+    setRenameSectionValue(currentName);
+  };
+
+  // A section's name lives on every real step row sharing its Process
+  // Step ID (see the comment on ProcessStepTabs' onRenameSection), so
+  // saving means updating ALL of them at once, not one label-list row the
+  // way Category/Process Group/Process ID renames do.
+  const handleRenameSectionSave = (): void => {
+    if (!renameSectionTarget) return;
+    const trimmed = renameSectionValue.trim();
+    if (!trimmed) return;
+    const affected = steps.filter(s => s.processStepId === renameSectionTarget.processStepId);
+    setSteps(prev => prev.map(s => (s.processStepId === renameSectionTarget.processStepId ? { ...s, processStepName: trimmed } : s)));
+    affected.forEach(step => {
+      dataService.updateProcessStep({ ...step, processStepName: trimmed }).catch((err: Error) => setError(err.message));
+    });
+    setRenameSectionTarget(undefined);
+  };
+
   // Confirmed design rule: v1 doesn't restrict who can lock/unlock to
   // specific people - anyone signed in can do either. Accountability comes
   // from every action being attributed (currentUserName) and permanently
@@ -1062,6 +1091,23 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       </Dialog>
 
       <Dialog
+        hidden={!renameSectionTarget}
+        onDismiss={() => setRenameSectionTarget(undefined)}
+        dialogContentProps={{ type: DialogType.normal, title: `Rename ${renameSectionTarget?.processStepId || ''}` }}
+      >
+        <TextField
+          label="Section name"
+          value={renameSectionValue}
+          onChange={(_e, v) => setRenameSectionValue(v || '')}
+          onKeyDown={e => { if (e.key === 'Enter') handleRenameSectionSave(); }}
+        />
+        <DialogFooter>
+          <DefaultButton text="Cancel" onClick={() => setRenameSectionTarget(undefined)} />
+          <PrimaryButton text="Save" onClick={handleRenameSectionSave} disabled={!renameSectionValue.trim()} />
+        </DialogFooter>
+      </Dialog>
+
+      <Dialog
         hidden={!lockDialogMode}
         onDismiss={() => { setLockDialogMode(undefined); setLockReasonValue(''); setUnlockPasswordValue(''); setUnlockPasswordError(false); }}
         dialogContentProps={{
@@ -1330,6 +1376,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                     selectedStepId={drilledDownStepId}
                     onSelect={setDrilledDownStepId}
                     onAddNew={activeLock || addBlockedInAllView ? undefined : () => setAddSectionOpen(true)}
+                    onRenameSection={activeLock ? undefined : openRenameSection}
                   />
                 </div>
 
