@@ -9,7 +9,6 @@ import styles from './AddHierarchyShellModal.module.scss';
 // not a confirmed real SharePoint choice list, just sensible fixed
 // options so these fields are picked rather than free-typed.
 const CONTROL_TYPE_OPTIONS: IDropdownOption[] = ['Preventive', 'Detective', 'Corrective'].map(v => ({ key: v, text: v }));
-const EXECUTION_METHOD_OPTIONS: IDropdownOption[] = ['Manual', 'Automated', 'IT-dependent'].map(v => ({ key: v, text: v }));
 
 export interface IAddControlModalProps {
   isOpen: boolean;
@@ -23,8 +22,8 @@ export interface IAddControlModalProps {
 // Writes a real row into "Control Register" - same deliberate exception
 // as AddRiskModal (see the schema comment on IDataService.addControlStatement).
 // Only a handful of the real columns are collected here (Control
-// Description, Control Owner, Control Type, Execution Method, Function) -
-// the rest (Risk ID/Statement, Frequency, Evidence, Status, Design/
+// Description, Control Owner, Control Type, Function) - the rest (Risk
+// ID/Statement, Execution Method, Frequency, Evidence, Status, Design/
 // Operating Effective?, Mapping Notes) were removed from this form
 // entirely 2026-09-15 at the user's request, left blank on creation.
 // Control ID is likewise not a field - auto-generated server-side (see
@@ -35,7 +34,6 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
   const [controlDescription, setControlDescription] = React.useState('');
   const [controlOwner, setControlOwner] = React.useState('');
   const [controlType, setControlType] = React.useState('');
-  const [executionMethod, setExecutionMethod] = React.useState('');
   // Named controlFunction, not function - "function" is a reserved word
   // and can't be a local variable/state name (same reasoning as
   // AddRiskModal's riskFunction).
@@ -48,7 +46,6 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
       setControlDescription('');
       setControlOwner('');
       setControlType('');
-      setExecutionMethod('');
       setControlFunction('');
       setError(undefined);
     }
@@ -78,7 +75,7 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
       controlDescription: trimmedDescription,
       controlOwner: controlOwner.trim(),
       controlType: controlType.trim(),
-      executionMethod: executionMethod.trim(),
+      executionMethod: '',
       frequency: '',
       evidence: '',
       status: '',
@@ -123,13 +120,6 @@ const AddControlModal: React.FC<IAddControlModalProps> = ({ isOpen, dataService,
         selectedKey={controlType || null}
         options={CONTROL_TYPE_OPTIONS}
         onChange={(_e, option) => setControlType(option ? String(option.key) : '')}
-      />
-      <Dropdown
-        label="Execution method"
-        placeholder="Choose from the list..."
-        selectedKey={executionMethod || null}
-        options={EXECUTION_METHOD_OPTIONS}
-        onChange={(_e, option) => setExecutionMethod(option ? String(option.key) : '')}
       />
       <ComboBox
         label="Function"
