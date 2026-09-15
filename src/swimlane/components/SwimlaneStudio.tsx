@@ -715,12 +715,25 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const renameSectionIdLooksValid = renameSectionTarget
     ? new RegExp(`^${renameSectionTarget.processStepId.split('.').slice(0, 3).join('\\.')}\\.\\d+$`).test(trimmedRenameSectionId)
     : false;
-  // A different, ALREADY-EXISTING section (not this one being renumbered)
-  // already using the target ID - blocked rather than silently merging
-  // two sections' steps together under one ID.
+  // Sections are per-region, not global (confirmed at the user's request -
+  // "they don't sit in their own category, they form part of a specific
+  // process for a specific region"): the SAME Process Step ID number can
+  // legitimately exist in UK's swimlane AND US's AND Global's, as three
+  // genuinely separate sections. Editing/deleting/collision-checking one
+  // must only ever touch steps in the CURRENTLY VIEWED region - the
+  // rename/delete dialog is only ever opened from within one region's own
+  // view (ProcessStepTabs/SwimlaneCanvas are both already region-filtered
+  // by the time they get here), so selectedFlowRegion is always the right
+  // scope for whichever section is being edited.
+  const stepsInSameRegionAs = (candidates: IProcessStep[]): IProcessStep[] =>
+    candidates.filter(s => (s.region || '') === (selectedFlowRegion || ''));
+  // A different, ALREADY-EXISTING section in this SAME region (not this
+  // one being renumbered, and not some other region's section that
+  // happens to share the target number) already using the target ID -
+  // blocked rather than silently merging two sections' steps together.
   const renameSectionIdCollides = !!renameSectionTarget
     && trimmedRenameSectionId !== renameSectionTarget.processStepId
-    && steps.some(s => s.processStepId === trimmedRenameSectionId);
+    && stepsInSameRegionAs(steps).some(s => s.processStepId === trimmedRenameSectionId);
 
   // A section's name and ID both live on every real step row sharing its
   // Process Step ID (see the comment on ProcessStepTabs' onRenameSection),
@@ -732,9 +745,10 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     if (!trimmedName || !renameSectionIdLooksValid || renameSectionIdCollides) return;
     const oldId = renameSectionTarget.processStepId;
     const newId = trimmedRenameSectionId;
-    const affected = steps.filter(s => s.processStepId === oldId);
+    const affected = stepsInSameRegionAs(steps.filter(s => s.processStepId === oldId));
+    const affectedIds = new Set(affected.map(s => s.id));
     pushUndo({ type: 'bulkEdit', previous: affected });
-    setSteps(prev => prev.map(s => (s.processStepId === oldId ? { ...s, processStepId: newId, processStepName: trimmedName } : s)));
+    setSteps(prev => prev.map(s => (affectedIds.has(s.id) ? { ...s, processStepId: newId, processStepName: trimmedName } : s)));
     affected.forEach(step => {
       dataService.updateProcessStep({ ...step, processStepId: newId, processStepName: trimmedName }).catch((err: Error) => setError(err.message));
     });
@@ -747,14 +761,15 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     setRenameSectionTarget(undefined);
   };
 
-  // Deletes every step sharing this Process Step ID - the whole section,
-  // not just the one row the small trash icon on an individual step
-  // already covers. Same "keep whatever local removal already happened"
-  // pattern as handleBulkDelete.
+  // Deletes every step sharing this Process Step ID IN THIS REGION - the
+  // whole section, not just the one row the small trash icon on an
+  // individual step already covers, and not some other region's
+  // same-numbered section (see stepsInSameRegionAs above). Same "keep
+  // whatever local removal already happened" pattern as handleBulkDelete.
   const handleDeleteSectionConfirm = (): void => {
     if (!renameSectionTarget) return;
     const targetId = renameSectionTarget.processStepId;
-    const deleted = steps.filter(s => s.processStepId === targetId);
+    const deleted = stepsInSameRegionAs(steps.filter(s => s.processStepId === targetId));
     const idsToDelete = deleted.map(s => s.id);
     setSteps(prev => prev.filter(s => !idsToDelete.includes(s.id)));
     idsToDelete.forEach(id => {
@@ -1216,7 +1231,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         dialogContentProps={{
           type: DialogType.normal,
           title: `Delete section ${renameSectionTarget?.processStepId || ''}?`,
-          subText: `Deletes all ${steps.filter(s => s.processStepId === renameSectionTarget?.processStepId).length} step(s) in this section. Undo is available right after, but not once you navigate away or too much time passes.`
+          subText: `Deletes all ${stepsInSameRegionAs(steps.filter(s => s.processStepId === renameSectionTarget?.processStepId)).length} step(s) in this section. Undo is available right after, but not once you navigate away or too much time passes.`
         }}
       >
         <DialogFooter>
