@@ -112,6 +112,28 @@
 
 .columnHeader {
   top: 0;
+  // Holds the label plus an optional inline rename button (see
+  // onRenameSection) - centered as a pair rather than just the text alone,
+  // so adding the button doesn't visually shift the label off-center.
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+// Sits right in the column header itself (added 2026-09-15 at the user's
+// request - the rename control needs to be reachable from the top of the
+// document, not only the small section tab below it - see
+// ProcessStepTabs' own separate renameButton for that one). Small and
+// muted so it doesn't compete with the label for attention until hovered.
+.renameHeaderButton {
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+
+  &:hover {
+    color: var(--blue);
+  }
 }
 
 // Job-title column - given its own louder treatment (bigger, bolder,

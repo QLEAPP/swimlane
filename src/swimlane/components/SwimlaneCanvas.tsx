@@ -31,7 +31,12 @@ export interface ISwimlaneCanvasProps {
   dataService: IDataService; // ControlLinkPicker writes straight to Control Register (see setControlLinkKey) - needs direct access, not staged via onEditStep like everything else in the edit panel
   onControlLinked: (updated: IControlStatement) => void;
   onControlCreated: (created: IControlStatement) => void;
-  drilledDownStepId: string | undefined;
+  // Rename affordance right on the column header itself (added 2026-09-15
+  // at the user's request - "it has to stay on top of the document", not
+  // buried in the small section tab below) - same underlying rename flow
+  // as ProcessStepTabs' own onRenameSection, just triggered from here too.
+  // Undefined while locked, same as every other edit affordance.
+  onRenameSection?: (stepId: string, currentName: string) => void;
   employees: IEmployee[];
   // True while the swimlane currently on screen is locked (see
   // IProcessIdLock) - disables dragging entirely and switches the edit
@@ -103,7 +108,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated,
-  drilledDownStepId, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, autoOpenStepId, onAutoOpenHandled,
+  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, autoOpenStepId, onAutoOpenHandled,
   swimlaneStage, stageSetBy, onToggleStage
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
@@ -912,17 +917,35 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       */}
       <div className={styles.grid} style={{ gridTemplateColumns: `170px repeat(${orderedSteps.length}, minmax(170px, 260px))` }}>
         <div className={styles.corner} />
-        {columnGroups.map(group => (
-          <div
-            className={styles.columnHeader}
-            key={group.processStepId}
-            style={{ gridColumn: `span ${group.stepIds.length}` }}
-          >
-            {drilledDownStepId
-              ? (orderedSteps.find(s => s.processStepId === group.processStepId)?.processStepName || group.processStepId)
-              : group.processStepId}
-          </div>
-        ))}
+        {columnGroups.map(group => {
+          // Was ID-only whenever viewing "All" (i.e. exactly where a name
+          // matters most - several sections side by side, each otherwise
+          // anonymous beyond a bare number) and name-only when drilled
+          // into one - backwards, fixed 2026-09-15 at the user's request
+          // ("not just 13.4.1.1 as a section with no name displayed").
+          // Always shows both now, so the document reads as a real
+          // workflow, not a row of numbers, in every view.
+          const name = orderedSteps.find(s => s.processStepId === group.processStepId)?.processStepName;
+          const label = name ? `${group.processStepId} — ${name}` : group.processStepId;
+          return (
+            <div
+              className={styles.columnHeader}
+              key={group.processStepId}
+              style={{ gridColumn: `span ${group.stepIds.length}` }}
+            >
+              <span>{label}</span>
+              {onRenameSection && (
+                <IconButton
+                  iconProps={{ iconName: 'Edit' }}
+                  title="Rename this section"
+                  ariaLabel="Rename this section"
+                  className={styles.renameHeaderButton}
+                  onClick={() => onRenameSection(group.processStepId, name || '')}
+                />
+              )}
+            </div>
+          );
+        })}
 
         <div
           className={[styles.highwaySpacer, needsHighwayStrip ? '' : styles.highwaySpacerCompact].filter(Boolean).join(' ')}

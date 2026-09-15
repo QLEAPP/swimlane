@@ -1391,7 +1391,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   dataService={dataService}
                   onControlLinked={handleControlLinked}
                   onControlCreated={handleControlCreated}
-                  drilledDownStepId={drilledDownStepId}
+                  onRenameSection={activeLock ? undefined : openRenameSection}
                   employees={employees}
                   isLocked={!!activeLock}
                   onLabelEdge={handleLabelEdge}

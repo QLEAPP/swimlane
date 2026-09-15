@@ -69,11 +69,15 @@ const AddStepSectionModal: React.FC<IAddStepSectionModalProps> = ({
       processStepName: trimmedName,
       actionType: 'Execute (Within Limits)',
       action: '',
-      // Seeds the shape's own label with the section name as a starting
-      // point rather than leaving it blank - immediately visible and
-      // editable on the canvas afterward, same "real but minimal" spirit
-      // as the Process Group/Process ID shells.
-      actionDescription: trimmedName,
+      // Deliberately NOT the section name (was, until 2026-09-15) - the
+      // section's own name already shows once, in the column header above
+      // the whole group (see SwimlaneCanvas); repeating it as this seed
+      // step's own action label made it look like a second, redundant
+      // step duplicating the section title rather than a real action
+      // waiting to be filled in. Generic instead, same "real but minimal"
+      // spirit as the Process Group/Process ID shells, immediately
+      // editable on the canvas afterward either way.
+      actionDescription: 'New step - click to edit',
       responsibleJobTitle: '',
       region: region || '',
       dependsOn: []
