@@ -174,10 +174,20 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // reached any specific one. The precise, side-aware check that decides
   // whether a specific half is ACTUALLY droppable right now lives in
   // handleCellDragOver/handleDrop below.
-  const isValidDropTarget = (columnStep: IProcessStep): boolean => {
-    if (isLocked || !draggingStepId || draggingStepId === columnStep.id) return false;
+  const isValidDropTarget = (columnStep: IProcessStep, lane: string): boolean => {
+    if (isLocked || !draggingStepId) return false;
     const dragged = stepsById.get(draggingStepId);
     if (!dragged) return false;
+    if (columnStep.id === draggingStepId) {
+      // Dropping back onto the dragged step's OWN column (added 2026-09-16
+      // at a real user's request - "reassign a step to a different role") -
+      // the only thing that can mean is landing on a different LANE's cell
+      // there, reassigning responsibleJobTitle alone with no reorder/
+      // section change at all (see handleCellDragOver/handleDrop). Landing
+      // back on the exact same lane it already has is a no-op, not a valid
+      // target.
+      return (dragged.responsibleJobTitle || 'Unassigned') !== lane;
+    }
     // Dragging across sections is allowed (added 2026-09-15 at a real
     // user's request - "move a step from one section to another") as well
     // as reordering within one - handleDrop copies columnStep's own
@@ -198,8 +208,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // Process Step ID and lane it lands on.
   const isValidNewShapeDropTarget = (): boolean => !isLocked && !!draggingNewShape;
 
-  const isValidDropTargetForCurrentDrag = (columnStep: IProcessStep): boolean =>
-    draggingNewShape ? isValidNewShapeDropTarget() : isValidDropTarget(columnStep);
+  const isValidDropTargetForCurrentDrag = (columnStep: IProcessStep, lane: string): boolean =>
+    draggingNewShape ? isValidNewShapeDropTarget() : isValidDropTarget(columnStep, lane);
 
   const handleDragStart = (step: IProcessStep) => (e: React.DragEvent): void => {
     setDraggingStepId(step.id);
@@ -221,9 +231,19 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       setDragOverCellId(`${lane}-${columnStep.id}`);
       return;
     }
-    if (!draggingStepId || draggingStepId === columnStep.id) return;
+    if (!draggingStepId) return;
     const dragged = stepsById.get(draggingStepId);
     if (!dragged || isLocked) return;
+    if (columnStep.id === draggingStepId) {
+      // Same column as the dragged step's own - see isValidDropTarget for
+      // why this can only mean reassigning its lane, never a reorder, so
+      // the dependency/position machinery below doesn't apply here at all.
+      if ((dragged.responsibleJobTitle || 'Unassigned') === lane) return; // the cell it already sits in - not a real target
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverCellId(`${lane}-${columnStep.id}`);
+      return;
+    }
     // Left half of the cell = drop before columnStep, right half = after -
     // the only way to land a step at the very front of its group, which
     // dropping-always-after (the original, only behaviour) could never
@@ -298,6 +318,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     if (!draggingStepId) { setDraggingStepId(undefined); return; }
     const dragged = stepsById.get(draggingStepId);
     if (!dragged) { setDraggingStepId(undefined); return; }
+    if (columnStep.id === draggingStepId) {
+      // Reassigning lane only, dropped back into the step's own column -
+      // see isValidDropTarget/handleCellDragOver. Position and section are
+      // untouched; only responsibleJobTitle changes.
+      setDraggingStepId(undefined);
+      if ((dragged.responsibleJobTitle || 'Unassigned') === lane) return;
+      onMoveStep({ ...dragged, responsibleJobTitle: lane === 'Unassigned' ? '' : lane });
+      return;
+    }
     // Recomputed from the drop event's own coordinates rather than
     // trusting the last dragOverPosition state - the drop can land on a
     // different element than the last dragover fired on (e.g. a fast
@@ -976,7 +1005,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               const isDragOverThisCell = dragOverCellId === cellKey;
               const cellClassName = [
                 styles.laneCell,
-                isValidDropTargetForCurrentDrag(step) ? styles.validDropTarget : '',
+                isValidDropTargetForCurrentDrag(step, lane) ? styles.validDropTarget : '',
                 isDragOverThisCell ? styles.dragOver : '',
                 isDragOverThisCell && !draggingNewShape
                   ? (dragOverPosition === 'before' ? styles.insertBefore : styles.insertAfter)
