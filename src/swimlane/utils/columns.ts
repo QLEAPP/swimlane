@@ -66,23 +66,27 @@ export function orderStepsForTimeline(steps: IProcessStep[]): IProcessStep[] {
 
 /**
  * New manualOrder for dropping `draggedStepId` next to wherever
- * `targetStepId` currently sits within their shared Process Step ID group
- * - the fractional-midpoint drag-reorder technique (sits strictly between
- * the target's own position and whichever neighbour is on the requested
- * side), so only the dragged step's own record needs to change, not
- * everyone else's. `insertBefore` defaults to false (insert immediately
- * after the target, the original and still most common case) - true
- * inserts immediately before it instead. Without this, there was no way
- * to drop a step so it became the very FIRST item in its group: every
- * drop always landed after whatever cell it was dropped on, and there's
- * no column further left than the first one to drop "after" to get the
- * same effect (confirmed real user report - dragging to the front of a
- * group was simply impossible, not just awkward). See SwimlaneCanvas's
- * handleCellDragOver/handleDrop for how the two halves of a cell each
- * map to one of these.
- * Returns undefined if the two steps aren't actually in the same group -
- * dragging across groups is out of scope (see the manualOrder comment on
- * IProcessStep for why).
+ * `targetStepId` currently sits within the TARGET's own Process Step ID
+ * group - the fractional-midpoint drag-reorder technique (sits strictly
+ * between the target's own position and whichever neighbour is on the
+ * requested side), so only the dragged step's own record needs to change,
+ * not everyone else's. `insertBefore` defaults to false (insert
+ * immediately after the target, the original and still most common case)
+ * - true inserts immediately before it instead. Without this, there was
+ * no way to drop a step so it became the very FIRST item in its group:
+ * every drop always landed after whatever cell it was dropped on, and
+ * there's no column further left than the first one to drop "after" to
+ * get the same effect (confirmed real user report - dragging to the front
+ * of a group was simply impossible, not just awkward). See
+ * SwimlaneCanvas's handleCellDragOver/handleDrop for how the two halves
+ * of a cell each map to one of these.
+ * Deliberately keyed to the TARGET's group, not "the dragged step's own
+ * group" (was, until 2026-09-15) - dragging a step onto a DIFFERENT
+ * section is a real, intentional move (SwimlaneCanvas's handleDrop copies
+ * columnStep's processStepId/processStepName onto the dragged step too),
+ * not just a same-group reorder, confirmed at a real user's request after
+ * "can't move a step to a different section at all" turned out to be this
+ * function silently refusing to compute an order for it.
  */
 export function computeDropOrder(
   allSteps: IProcessStep[],
@@ -92,11 +96,11 @@ export function computeDropOrder(
 ): number | undefined {
   const dragged = allSteps.find(s => s.id === draggedStepId);
   const target = allSteps.find(s => s.id === targetStepId);
-  if (!dragged || !target || dragged.processStepId !== target.processStepId || dragged.id === target.id) {
+  if (!dragged || !target || dragged.id === target.id) {
     return undefined;
   }
   const groupSteps = orderStepsForTimeline(
-    allSteps.filter(s => s.processStepId === dragged.processStepId && s.id !== draggedStepId)
+    allSteps.filter(s => s.processStepId === target.processStepId && s.id !== draggedStepId)
   );
   const targetIdx = groupSteps.findIndex(s => s.id === targetStepId);
   if (targetIdx === -1) return undefined;
@@ -143,15 +147,20 @@ export function computeInsertOrderBefore(allSteps: IProcessStep[], targetStepId:
 /**
  * Whether dropping `draggedStepId` next to `targetStepId` (before or
  * after, per `insertBefore` - i.e. at whatever order computeDropOrder
- * would give it) keeps every direct DependsOn relationship inside the
- * group pointing forward - confirmed design rule is that arrows must
- * keep moving in chronological order, so a step can't be dragged to sit
- * before something it depends on, or after something that depends on it.
- * Only edges where BOTH ends share the dragged step's Process Step ID
- * group can even be affected by an intra-group reorder - a cross-group
- * dependency's relative order never changes, since groups themselves
- * always stay in Process Step ID order regardless of manualOrder within
- * one of them.
+ * would give it, and whatever section `targetStepId` itself belongs to)
+ * keeps every direct DependsOn relationship pointing forward - confirmed
+ * design rule is that arrows must keep moving in chronological order, so
+ * a step can't be dragged to sit before something it depends on, or after
+ * something that depends on it.
+ *
+ * Simulates the FULL post-drop column order across every section (was,
+ * until 2026-09-15, only checked siblings within the dragged step's OWN
+ * group) rather than just its immediate group - moving a step to a
+ * DIFFERENT section is now a real, supported action (see computeDropOrder
+ * and SwimlaneCanvas's handleDrop), and that changes its left-to-right
+ * position relative to EVERY other step, not just its old group's
+ * siblings, so a dependency reaching outside both the old and new group
+ * could still end up pointing backward and needs checking too.
  */
 export function dropKeepsDependencyOrder(
   allSteps: IProcessStep[],
@@ -161,19 +170,25 @@ export function dropKeepsDependencyOrder(
   insertBefore = false
 ): boolean {
   const dragged = allSteps.find(s => s.id === draggedStepId);
+  const target = allSteps.find(s => s.id === targetStepId);
   const newOrder = computeDropOrder(allSteps, draggedStepId, targetStepId, insertBefore);
-  if (!dragged || newOrder === undefined) return false;
+  if (!dragged || !target || newOrder === undefined) return false;
+
+  const simulated = allSteps.map(s => (s.id === draggedStepId
+    ? { ...s, processStepId: target.processStepId, manualOrder: newOrder }
+    : s));
+  const indexById = new Map(orderStepsForTimeline(simulated).map((s, i) => [s.id, i]));
+  const draggedIdx = indexById.get(draggedStepId);
+  if (draggedIdx === undefined) return false;
 
   return edges.every(edge => {
     if (edge.fromRowId === draggedStepId) {
-      const successor = allSteps.find(s => s.id === edge.toRowId);
-      if (!successor || successor.processStepId !== dragged.processStepId) return true;
-      return getEffectiveOrder(successor, allSteps) > newOrder;
+      const successorIdx = indexById.get(edge.toRowId);
+      return successorIdx === undefined || successorIdx > draggedIdx;
     }
     if (edge.toRowId === draggedStepId) {
-      const predecessor = allSteps.find(s => s.id === edge.fromRowId);
-      if (!predecessor || predecessor.processStepId !== dragged.processStepId) return true;
-      return getEffectiveOrder(predecessor, allSteps) < newOrder;
+      const predecessorIdx = indexById.get(edge.fromRowId);
+      return predecessorIdx === undefined || predecessorIdx < draggedIdx;
     }
     return true;
   });

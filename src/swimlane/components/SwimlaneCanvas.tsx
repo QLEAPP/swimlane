@@ -48,9 +48,10 @@ export interface ISwimlaneCanvasProps {
   onEditStep: (step: IProcessStep) => void;
   onDeleteStep: (stepId: string) => void;
   // Drag-and-drop: dropping a step onto another step's cell moves it to
-  // that lane and re-sequences it to sit right after that step within
-  // their shared Process Step ID group - see computeDropOrder for why
-  // dragging is confined to one group.
+  // that lane and re-sequences it to sit right after that step - within
+  // its current section, or into a DIFFERENT one if the target cell
+  // belongs to a different Process Step ID group (added 2026-09-15 at a
+  // real user's request) - see computeDropOrder/dropKeepsDependencyOrder.
   onMoveStep: (updated: IProcessStep) => void;
   // Drag-from-legend: dropping a shape from ShapeLegend onto a cell
   // creates a brand new step there - lane and Process Step ID come from
@@ -176,13 +177,16 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const isValidDropTarget = (columnStep: IProcessStep): boolean => {
     if (isLocked || !draggingStepId || draggingStepId === columnStep.id) return false;
     const dragged = stepsById.get(draggingStepId);
-    if (!dragged || dragged.processStepId !== columnStep.processStepId) return false;
-    // Confirmed design rule: dragging can reorder within the group, but
-    // never to a position that would put the step before something it
-    // depends on, or after something that depends on it - that's what
-    // produced backward-pointing arrows before this check existed.
-    // Either side counts here - a cell showing the dashed outline just
-    // means SOME drop there is legal, not that both halves necessarily are.
+    if (!dragged) return false;
+    // Dragging across sections is allowed (added 2026-09-15 at a real
+    // user's request - "move a step from one section to another") as well
+    // as reordering within one - handleDrop copies columnStep's own
+    // Process Step ID/name onto the dragged step when they differ. Either
+    // way, never to a position that would put the step before something
+    // it depends on, or after something that depends on it - that's what
+    // produced backward-pointing arrows before this check existed. Either
+    // side counts here - a cell showing the dashed outline just means
+    // SOME drop there is legal, not that both halves necessarily are.
     return dropKeepsDependencyOrder(allSteps, edges, draggingStepId, columnStep.id, true)
       || dropKeepsDependencyOrder(allSteps, edges, draggingStepId, columnStep.id, false);
   };
@@ -219,7 +223,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     }
     if (!draggingStepId || draggingStepId === columnStep.id) return;
     const dragged = stepsById.get(draggingStepId);
-    if (!dragged || dragged.processStepId !== columnStep.processStepId || isLocked) return;
+    if (!dragged || isLocked) return;
     // Left half of the cell = drop before columnStep, right half = after -
     // the only way to land a step at the very front of its group, which
     // dropping-always-after (the original, only behaviour) could never
@@ -301,14 +305,19 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // where it actually landed.
     const rect = e.currentTarget.getBoundingClientRect();
     const insertBefore = e.clientX - rect.left < rect.width / 2;
-    if (dragged.processStepId !== columnStep.processStepId
-      || !dropKeepsDependencyOrder(allSteps, edges, draggingStepId, columnStep.id, insertBefore)) {
+    if (!dropKeepsDependencyOrder(allSteps, edges, draggingStepId, columnStep.id, insertBefore)) {
       setDraggingStepId(undefined);
       return;
     }
     const newOrder = computeDropOrder(allSteps, draggingStepId, columnStep.id, insertBefore);
     onMoveStep({
       ...dragged,
+      // Adopts the target column's own section (added 2026-09-15 at a
+      // real user's request) - a no-op object-spread when dropped back
+      // into its own section, a real section move when dropped into a
+      // different one.
+      processStepId: columnStep.processStepId,
+      processStepName: columnStep.processStepName,
       responsibleJobTitle: lane === 'Unassigned' ? '' : lane,
       manualOrder: newOrder !== undefined ? newOrder : dragged.manualOrder
     });
