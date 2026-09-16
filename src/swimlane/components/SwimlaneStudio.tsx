@@ -1231,7 +1231,14 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         dialogContentProps={{
           type: DialogType.normal,
           title: `Delete section ${renameSectionTarget?.processStepId || ''}?`,
-          subText: `Deletes all ${stepsInSameRegionAs(steps.filter(s => s.processStepId === renameSectionTarget?.processStepId)).length} step(s) in this section. Undo is available right after, but not once you navigate away or too much time passes.`
+          // Corrected 2026-09-16 - this used to claim undo stops working
+          // "once you navigate away", which was never true: undoStack
+          // (see pushUndo) isn't tied to the current tab/process/region at
+          // all, only to a ~10s idle timer or 20 more actions pushing it
+          // off the stack (see MAX_UNDO_STACK) - confirmed by code review,
+          // the old wording could wrongly convince someone a deletion was
+          // already unrecoverable when it wasn't.
+          subText: `Deletes all ${stepsInSameRegionAs(steps.filter(s => s.processStepId === renameSectionTarget?.processStepId)).length} step(s) in this section. Undo is available for about 10 seconds afterward, or until you take another action.`
         }}
       >
         <DialogFooter>

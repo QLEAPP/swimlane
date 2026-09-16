@@ -99,22 +99,33 @@ export function computeDropOrder(
   if (!dragged || !target || dragged.id === target.id) {
     return undefined;
   }
+  // Scoped to the target's own region (added 2026-09-16 - confirmed real
+  // bug: the same Process Step ID can legitimately exist as separate
+  // sections in different regions, e.g. UK's "9.6.1.2" and US's "9.6.1.2"
+  // are unrelated sections that just happen to share a number - see
+  // stepsInSameRegionAs in SwimlaneStudio.tsx for the same rule applied to
+  // rename/delete). `allSteps` here is the app-wide, cross-region,
+  // cross-Process-ID dataset (needed elsewhere for DependsOn row-number
+  // resolution), so without this filter a same-numbered step from a
+  // DIFFERENT region could get pulled into the fractional-midpoint
+  // calculation as a false "neighbour" and misplace the drop.
+  const regionSteps = allSteps.filter(s => (s.region || '') === (target.region || ''));
   const groupSteps = orderStepsForTimeline(
-    allSteps.filter(s => s.processStepId === target.processStepId && s.id !== draggedStepId)
+    regionSteps.filter(s => s.processStepId === target.processStepId && s.id !== draggedStepId)
   );
   const targetIdx = groupSteps.findIndex(s => s.id === targetStepId);
   if (targetIdx === -1) return undefined;
-  const targetOrder = getEffectiveOrder(groupSteps[targetIdx], allSteps);
+  const targetOrder = getEffectiveOrder(groupSteps[targetIdx], regionSteps);
 
   if (insertBefore) {
     const prevOrder = targetIdx - 1 >= 0
-      ? getEffectiveOrder(groupSteps[targetIdx - 1], allSteps)
+      ? getEffectiveOrder(groupSteps[targetIdx - 1], regionSteps)
       : targetOrder - 1;
     return (prevOrder + targetOrder) / 2;
   }
 
   const nextOrder = targetIdx + 1 < groupSteps.length
-    ? getEffectiveOrder(groupSteps[targetIdx + 1], allSteps)
+    ? getEffectiveOrder(groupSteps[targetIdx + 1], regionSteps)
     : targetOrder + 1;
   return (targetOrder + nextOrder) / 2;
 }
@@ -134,12 +145,16 @@ export function computeDropOrder(
 export function computeInsertOrderBefore(allSteps: IProcessStep[], targetStepId: string): number | undefined {
   const target = allSteps.find(s => s.id === targetStepId);
   if (!target) return undefined;
-  const groupSteps = orderStepsForTimeline(allSteps.filter(s => s.processStepId === target.processStepId));
+  // Scoped to the target's own region - see the same fix/comment on
+  // computeDropOrder above; a same-numbered section in another region
+  // isn't a real neighbour here either.
+  const regionSteps = allSteps.filter(s => (s.region || '') === (target.region || ''));
+  const groupSteps = orderStepsForTimeline(regionSteps.filter(s => s.processStepId === target.processStepId));
   const targetIdx = groupSteps.findIndex(s => s.id === targetStepId);
   if (targetIdx === -1) return undefined;
-  const targetOrder = getEffectiveOrder(groupSteps[targetIdx], allSteps);
+  const targetOrder = getEffectiveOrder(groupSteps[targetIdx], regionSteps);
   const prevOrder = targetIdx > 0
-    ? getEffectiveOrder(groupSteps[targetIdx - 1], allSteps)
+    ? getEffectiveOrder(groupSteps[targetIdx - 1], regionSteps)
     : targetOrder - 1;
   return (prevOrder + targetOrder) / 2;
 }
@@ -174,7 +189,13 @@ export function dropKeepsDependencyOrder(
   const newOrder = computeDropOrder(allSteps, draggedStepId, targetStepId, insertBefore);
   if (!dragged || !target || newOrder === undefined) return false;
 
-  const simulated = allSteps.map(s => (s.id === draggedStepId
+  // Scoped to the target's own region - see the same fix/comment on
+  // computeDropOrder above. Only matters for steps actually rendered
+  // together on the same (already region-scoped) canvas, so simulating
+  // the post-drop order across a DIFFERENT region's same-numbered section
+  // both wastes work and risks a false neighbour skewing the result.
+  const regionSteps = allSteps.filter(s => (s.region || '') === (target.region || ''));
+  const simulated = regionSteps.map(s => (s.id === draggedStepId
     ? { ...s, processStepId: target.processStepId, manualOrder: newOrder }
     : s));
   const indexById = new Map(orderStepsForTimeline(simulated).map((s, i) => [s.id, i]));
