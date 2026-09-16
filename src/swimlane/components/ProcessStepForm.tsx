@@ -66,11 +66,14 @@ export interface IProcessStepFormProps {
   dataService: IDataService;
   onControlLinked: (updated: IControlStatement) => void;
   onControlCreated: (created: IControlStatement) => void;
+  // Fires after a brand-new risk is created via RiskLinkPicker's own
+  // inline "create" section - see the prop comment there.
+  onRiskCreated: (created: IRiskStatement) => void;
 }
 
 const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
   value, onChange, employees, dependsOnOptions, riskStatements, controlStatements, processStepId, processDescription,
-  dataService, onControlLinked, onControlCreated
+  dataService, onControlLinked, onControlCreated, onRiskCreated
 }) => {
   const set = <K extends keyof IProcessStepFormValue>(key: K, v: IProcessStepFormValue[K]): void => {
     onChange({ ...value, [key]: v });
@@ -144,6 +147,8 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
         riskStatements={riskStatements}
         value={value.linkedRisks}
         onChange={links => set('linkedRisks', links)}
+        dataService={dataService}
+        onRiskCreated={onRiskCreated}
       />
       <ControlLinkPicker
         controlStatements={controlStatements}

@@ -31,6 +31,10 @@ export interface ISwimlaneCanvasProps {
   dataService: IDataService; // ControlLinkPicker writes straight to Control Register (see setControlLinkKey) - needs direct access, not staged via onEditStep like everything else in the edit panel
   onControlLinked: (updated: IControlStatement) => void;
   onControlCreated: (created: IControlStatement) => void;
+  // Fires after a brand-new risk is created via RiskLinkPicker's own
+  // inline "create" section (see the prop comment there) - same
+  // "hand up what actually happened" pattern as onControlCreated.
+  onRiskCreated: (created: IRiskStatement) => void;
   // Rename affordance right on the column header itself (added 2026-09-15
   // at the user's request - "it has to stay on top of the document", not
   // buried in the small section tab below) - same underlying rename flow
@@ -108,7 +112,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // each box actually faces the other node, so lines don't cut diagonally
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
-  steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated,
+  steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated, onRiskCreated,
   onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, autoOpenStepId, onAutoOpenHandled,
   swimlaneStage, stageSetBy, onToggleStage
 }) => {
@@ -1124,6 +1128,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 dataService={dataService}
                 onControlLinked={onControlLinked}
                 onControlCreated={onControlCreated}
+                onRiskCreated={onRiskCreated}
               />
               <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked} />
             </div>

@@ -32,6 +32,7 @@ export interface INewProcessModalProps {
   onGroupLabelCreated: (created: IProcessGroupLabel) => void;
   onControlLinked: (updated: IControlStatement) => void;
   onControlCreated: (created: IControlStatement) => void;
+  onRiskCreated: (created: IRiskStatement) => void;
 }
 
 const emptyStepDraft = (): IProcessStepFormValue => ({
@@ -55,7 +56,7 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
 // infer) and otherwise reuses the same ProcessStepForm as everywhere else.
 const NewProcessModal: React.FC<INewProcessModalProps> = ({
   isOpen, steps, employees, riskStatements, controlStatements, dataService, processStepIdPrefix, knownProcessGroupIds,
-  onDismiss, onCreated, onGroupLabelCreated, onControlLinked, onControlCreated
+  onDismiss, onCreated, onGroupLabelCreated, onControlLinked, onControlCreated, onRiskCreated
 }) => {
   const [processStepId, setProcessStepId] = React.useState('');
   const [processGroupName, setProcessGroupName] = React.useState('');
@@ -192,6 +193,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         dataService={dataService}
         onControlLinked={onControlLinked}
         onControlCreated={onControlCreated}
+        onRiskCreated={onRiskCreated}
       />
 
       <div className={styles.footer}>

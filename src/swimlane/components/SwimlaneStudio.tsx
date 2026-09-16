@@ -1122,6 +1122,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         onGroupLabelCreated={handleGroupLabelCreated}
         onControlLinked={handleControlLinked}
         onControlCreated={handleControlCreated}
+        onRiskCreated={handleRiskCreated}
       />
 
       <AddHierarchyShellModal
@@ -1625,6 +1626,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   dataService={dataService}
                   onControlLinked={handleControlLinked}
                   onControlCreated={handleControlCreated}
+                  onRiskCreated={handleRiskCreated}
                   onRenameSection={activeLock ? undefined : openRenameSection}
                   employees={employees}
                   isLocked={!!activeLock}
@@ -1663,6 +1665,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                         dataService={dataService}
                         onControlLinked={handleControlLinked}
                         onControlCreated={handleControlCreated}
+                        onRiskCreated={handleRiskCreated}
                       />
                       <PrimaryButton
                         text={saving ? 'Adding...' : 'Add step'}
