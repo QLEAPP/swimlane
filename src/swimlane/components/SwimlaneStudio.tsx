@@ -1,7 +1,7 @@
 ﻿import * as React from 'react';
 import {
   Spinner, MessageBar, MessageBarType, MessageBarButton, DefaultButton, PrimaryButton, IconButton, Pivot, PivotItem,
-  Dialog, DialogType, DialogFooter, TextField
+  Dialog, DialogType, DialogFooter, TextField, Panel, PanelType
 } from '@fluentui/react';
 import styles from './SwimlaneStudio.module.scss';
 import type { ISwimlaneStudioProps } from './ISwimlaneStudioProps';
@@ -52,21 +52,35 @@ type MainTab = 'flows' | 'employees' | 'risks' | 'controls' | 'audit' | 'improve
 // covers every action that loses data outright: deleting a step,
 // bulk-deleting a whole flow or section, editing (which overwrites the
 // previous field values), and renaming/renumbering a section (which
-// overwrites several steps' values at once - see bulkEdit). Adding/moving
-// a step isn't covered - a mistaken add is trivial to just delete, and a
-// mistaken drag is trivial to just drag back. NOTE: undoing a delete
-// re-creates the step via addProcessStep, which appends it as a new row
-// rather than reinserting it at its exact original position - if another
-// step's DependsOn token referenced it by original row number (see
-// dependencyResolution.ts), that link won't perfectly restore.
-// Pre-existing limitation of the row-number dependency system, not
-// something undo makes worse - deleting already shifts every later row's
-// number regardless of whether the delete is later undone.
+// overwrites several steps' values at once - see bulkEdit). Moving a step
+// (drag-reorder, drag to a different section, drag to reassign its lane -
+// see SwimlaneCanvas) IS covered too, despite looking like a separate
+// gesture - onMoveStep is wired straight to handleEditStep below, so a
+// drag pushes an ordinary 'edit' entry the same as any other field
+// change. Only adding a step isn't covered - a mistaken add is trivial to
+// just delete, and unlike the others it hasn't overwritten anything.
+// NOTE: undoing a delete re-creates the step via addProcessStep, which
+// appends it as a new row rather than reinserting it at its exact
+// original position - if another step's DependsOn token referenced it by
+// original row number (see dependencyResolution.ts), that link won't
+// perfectly restore. Pre-existing limitation of the row-number dependency
+// system, not something undo makes worse - deleting already shifts every
+// later row's number regardless of whether the delete is later undone.
 type UndoAction =
   | { type: 'delete'; step: IProcessStep }
   | { type: 'bulkDelete'; steps: IProcessStep[] }
   | { type: 'edit'; previous: IProcessStep }
   | { type: 'bulkEdit'; previous: IProcessStep[] };
+
+// Shared between the toast banner and the history panel (see
+// undoHistoryOpen) so the two can never describe the same entry
+// differently.
+function describeUndoAction(action: UndoAction): string {
+  if (action.type === 'delete') return `Deleted "${action.step.actionDescription}"`;
+  if (action.type === 'bulkDelete') return `Deleted ${action.steps.length} step${action.steps.length === 1 ? '' : 's'}`;
+  if (action.type === 'edit') return `Updated "${action.previous.actionDescription}"`;
+  return `Renamed/renumbered ${action.previous.length} step${action.previous.length === 1 ? '' : 's'}`;
+}
 
 // Caps how far back undo can go, same reasoning most editors cap undo
 // depth - an unbounded stack would just be a slow memory leak across a
@@ -187,18 +201,24 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // Oldest action first, most recent (what Undo acts on next) last - a
   // real stack, not just the one last action (see the UndoAction comment).
   const [undoStack, setUndoStack] = React.useState<UndoAction[]>([]);
+  // Whether the small toast-style banner (see below) is currently showing -
+  // separate from undoStack itself (changed 2026-09-16 at the user's
+  // request - "allow a history of undo" for "stuff one did that were not
+  // supposed to"). The banner still auto-hides a while after the last
+  // action so it doesn't linger forever on screen, but the underlying
+  // history it was reading from used to get wiped out at the very same
+  // moment - meaning noticing a mistake more than ~10s after making it
+  // left nothing left to undo. Now only the banner's VISIBILITY times out;
+  // the stack itself persists (capped at MAX_UNDO_STACK, same as always)
+  // and stays reachable any time via the "Undo history" button.
+  const [showUndoBanner, setShowUndoBanner] = React.useState(false);
+  const [undoHistoryOpen, setUndoHistoryOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<MainTab>('flows');
 
-  // The undo banner doesn't linger forever - clears itself a while after
-  // the last action, same as most "Undo" toasts. Resets on every push OR
-  // pop (the effect re-runs since undoStack is a new array reference each
-  // time), so ongoing activity always gets the full window rather than
-  // inheriting whatever was left of a previous one. Clears the WHOLE
-  // stack when it fires, not just the banner - an undo history nobody's
-  // touched in a while isn't worth holding onto indefinitely.
   React.useEffect(() => {
-    if (undoStack.length === 0) return;
-    const timer = window.setTimeout(() => setUndoStack([]), 10000);
+    if (undoStack.length === 0) { setShowUndoBanner(false); return; }
+    setShowUndoBanner(true);
+    const timer = window.setTimeout(() => setShowUndoBanner(false), 10000);
     return () => window.clearTimeout(timer);
   }, [undoStack]);
 
@@ -528,14 +548,11 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     setBulkDeleteOpen(false);
   };
 
-  // Pops and reverts just the MOST RECENT action, not the whole stack -
-  // click Undo again right after and the banner already shows the next
-  // one back, same chained feel as a real multi-level undo without a
-  // separate history-browsing UI to build.
-  const handleUndo = (): void => {
-    if (undoStack.length === 0) return;
-    const action = undoStack[undoStack.length - 1];
-    setUndoStack(prev => prev.slice(0, -1));
+  // Reverts a single action's content - shared by handleUndo (one) and
+  // handleUndoThrough (several at once, for the history panel's per-row
+  // "Undo to here"). Doesn't touch undoStack itself - both callers do
+  // that afterward, once, for however many entries they actually popped.
+  const applyUndo = (action: UndoAction): void => {
     if (action.type === 'edit') {
       // Undoing IS itself a real modification event (someone just acted,
       // right now) even though the CONTENT reverts to old values - so this
@@ -564,6 +581,31 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           .catch((err: Error) => setError(err.message));
       });
     }
+  };
+
+  // Pops and reverts just the MOST RECENT action, not the whole stack -
+  // click Undo again right after and the banner already shows the next
+  // one back, same chained feel as a real multi-level undo without a
+  // separate history-browsing UI to build. Also what the banner's own
+  // "Undo" button calls.
+  const handleUndo = (): void => {
+    if (undoStack.length === 0) return;
+    applyUndo(undoStack[undoStack.length - 1]);
+    setUndoStack(prev => prev.slice(0, -1));
+  };
+
+  // The history panel's per-row "Undo to here" (added 2026-09-16 at the
+  // user's request - "allow a history of undo") - reverts everything from
+  // the most recent action down through the one at `index`, inclusive,
+  // most-recent-first. A stack can only unwind from the top: reverting an
+  // older action without also reverting everything done after it would
+  // leave state that conflicts with those later changes (e.g. undoing a
+  // rename from under a delete that happened afterward).
+  const handleUndoThrough = (index: number): void => {
+    for (let i = undoStack.length - 1; i >= index; i--) {
+      applyUndo(undoStack[i]);
+    }
+    setUndoStack(prev => prev.slice(0, index));
   };
 
   const handleImported = (created: IProcessStep[]): void => {
@@ -1323,6 +1365,42 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         </DialogFooter>
       </Dialog>
 
+      {/*
+        Added 2026-09-16 at the user's request ("add an undo button for
+        stuff one did that were not supposed to and allow a history of
+        undo") - the toast banner above is quick but transient (hides
+        after ~10s - see showUndoBanner); this is the persistent way back
+        in to the same undoStack, reachable any time via the "Undo
+        history" toolbar button regardless of how long ago the mistake
+        happened or how much else has been undone/redone since. Most
+        recent action listed first, since that's the only one a plain
+        "Undo" click would act on - every row below it is "Undo to here"
+        instead, since a stack can only unwind from the top (see
+        handleUndoThrough).
+      */}
+      <Panel
+        isOpen={undoHistoryOpen}
+        onDismiss={() => setUndoHistoryOpen(false)}
+        type={PanelType.smallFixedFar}
+        headerText={`Undo history${undoStack.length > 0 ? ` (${undoStack.length})` : ''}`}
+      >
+        {undoStack.length === 0 && <p>Nothing to undo right now.</p>}
+        <div className={styles.undoHistoryList}>
+          {[...undoStack].reverse().map((action, i) => {
+            const index = undoStack.length - 1 - i; // real position in undoStack
+            return (
+              <div className={styles.undoHistoryRow} key={index}>
+                <span>{describeUndoAction(action)}</span>
+                <DefaultButton
+                  text={i === 0 ? 'Undo' : 'Undo to here'}
+                  onClick={() => handleUndoThrough(index)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
       <section className={styles.swimlaneStudio}>
         {error && (
           <MessageBar messageBarType={MessageBarType.error} onDismiss={() => setError(undefined)}>
@@ -1330,20 +1408,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
           </MessageBar>
         )}
 
-        {undoStack.length > 0 && (() => {
+        {showUndoBanner && undoStack.length > 0 && (() => {
           const lastAction = undoStack[undoStack.length - 1];
           const earlierCount = undoStack.length - 1;
           return (
             <MessageBar
               messageBarType={MessageBarType.info}
-              onDismiss={() => setUndoStack([])}
+              // Dismissing the toast only hides IT - the history underneath
+              // stays put (see showUndoBanner) and is still reachable via
+              // the "Undo history" button below, not gone forever.
+              onDismiss={() => setShowUndoBanner(false)}
               actions={<MessageBarButton onClick={handleUndo}>Undo</MessageBarButton>}
             >
-              {lastAction.type === 'delete' && `Deleted "${lastAction.step.actionDescription}".`}
-              {lastAction.type === 'bulkDelete' && `Deleted ${lastAction.steps.length} step${lastAction.steps.length === 1 ? '' : 's'}.`}
-              {lastAction.type === 'edit' && `Updated "${lastAction.previous.actionDescription}".`}
-              {lastAction.type === 'bulkEdit' && `Renamed/renumbered ${lastAction.previous.length} step${lastAction.previous.length === 1 ? '' : 's'}.`}
-              {earlierCount > 0 && ` (${earlierCount} more earlier action${earlierCount === 1 ? '' : 's'} can still be undone after this.)`}
+              {describeUndoAction(lastAction)}.
+              {earlierCount > 0 && ` (${earlierCount} more earlier action${earlierCount === 1 ? '' : 's'} - see "Undo history".)`}
             </MessageBar>
           );
         })()}
@@ -1479,6 +1557,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                       text="Leave a comment"
                       iconProps={{ iconName: 'Comment' }}
                       onClick={() => setCommentDialogOpen(true)}
+                    />
+                    <DefaultButton
+                      text={`Undo history${undoStack.length > 0 ? ` (${undoStack.length})` : ''}`}
+                      iconProps={{ iconName: 'History' }}
+                      disabled={undoStack.length === 0}
+                      onClick={() => setUndoHistoryOpen(true)}
                     />
                     <IconButton
                       menuIconProps={{ iconName: 'More' }}

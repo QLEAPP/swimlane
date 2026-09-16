@@ -124,6 +124,31 @@
   align-self: stretch;
 }
 
+// The "Undo history" Panel's list (see SwimlaneStudio.tsx) - most recent
+// action at the top, each row its own description plus a right-aligned
+// undo button, same left-content/right-action layout as .connectionRow
+// in SwimlaneCanvas.module.scss uses for a similar per-item row.
+.undoHistoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.undoHistoryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
 .cardTitle {
   margin: 0 0 4px;
   font-size: var(--fs-lg);
