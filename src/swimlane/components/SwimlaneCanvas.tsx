@@ -150,8 +150,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // Which half of dragOverCellId's cell the pointer is currently over -
   // left half means the dragged step would land immediately BEFORE
   // columnStep, right half immediately AFTER (see computeDropOrder).
-  // Only meaningful together with dragOverCellId; stale otherwise.
-  const [dragOverPosition, setDragOverPosition] = React.useState<'before' | 'after'>('after');
+  // 'reassign' is the lane-reassignment case (dropped back into the
+  // dragged step's own column, just a different lane - see
+  // handleCellDragOver) - added 2026-09-16 because without a distinct
+  // value here, that drop kept whatever stale 'before'/'after' a PRIOR,
+  // unrelated reorder-drag this session had last left behind, drawing a
+  // misleading insert-position bar on a drop that doesn't reorder
+  // anything at all. Only meaningful together with dragOverCellId; stale
+  // otherwise.
+  const [dragOverPosition, setDragOverPosition] = React.useState<'before' | 'after' | 'reassign'>('after');
   // Latest pointer position during a drag, kept in a ref (not state) since
   // it's read every animation frame by the auto-scroll loop below and
   // doesn't need to trigger a re-render on its own - only the scroll
@@ -159,6 +166,18 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const dragPointerRef = React.useRef<{ x: number; y: number } | undefined>(undefined);
 
   const stepsById = React.useMemo(() => new Map(steps.map(s => [s.id, s])), [steps]);
+
+  // Whether dropping `dragged` back onto its OWN column, landing on
+  // `lane`, is a real lane-reassignment target - i.e. `lane` differs from
+  // what it already has (added 2026-09-16 at a real user's request -
+  // "reassign a step to a different role"). Shared by isValidDropTarget,
+  // handleCellDragOver and handleDrop below rather than each re-deriving
+  // it separately, since this file's own design (see the "coarse" vs.
+  // "precise" comment just below) depends on those staying in sync - a
+  // cell showing the dashed outline but handleDrop silently no-op'ing (or
+  // vice versa) would be exactly the bug that split was meant to prevent.
+  const isLaneReassignTarget = (dragged: IProcessStep, lane: string): boolean =>
+    (dragged.responsibleJobTitle || 'Unassigned') !== lane;
 
   // Drag-and-drop: `columnStep` is whichever step the target COLUMN
   // belongs to (orderedSteps[i] for that column, regardless of which
@@ -186,7 +205,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       // section change at all (see handleCellDragOver/handleDrop). Landing
       // back on the exact same lane it already has is a no-op, not a valid
       // target.
-      return (dragged.responsibleJobTitle || 'Unassigned') !== lane;
+      return isLaneReassignTarget(dragged, lane);
     }
     // Dragging across sections is allowed (added 2026-09-15 at a real
     // user's request - "move a step from one section to another") as well
@@ -238,10 +257,11 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       // Same column as the dragged step's own - see isValidDropTarget for
       // why this can only mean reassigning its lane, never a reorder, so
       // the dependency/position machinery below doesn't apply here at all.
-      if ((dragged.responsibleJobTitle || 'Unassigned') === lane) return; // the cell it already sits in - not a real target
+      if (!isLaneReassignTarget(dragged, lane)) return; // the cell it already sits in - not a real target
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       setDragOverCellId(`${lane}-${columnStep.id}`);
+      setDragOverPosition('reassign'); // not a reorder - no insert-before/after bar to show (see dragOverPosition)
       return;
     }
     // Left half of the cell = drop before columnStep, right half = after -
@@ -319,11 +339,13 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     const dragged = stepsById.get(draggingStepId);
     if (!dragged) { setDraggingStepId(undefined); return; }
     if (columnStep.id === draggingStepId) {
-      // Reassigning lane only, dropped back into the step's own column -
-      // see isValidDropTarget/handleCellDragOver. Position and section are
-      // untouched; only responsibleJobTitle changes.
+      // Reassigning lane only, dropped back into the step's own column
+      // (added 2026-09-16 at a real user's request - "reassign a step to a
+      // different role") - see isValidDropTarget/handleCellDragOver.
+      // Position and section are untouched; only responsibleJobTitle
+      // changes.
       setDraggingStepId(undefined);
-      if ((dragged.responsibleJobTitle || 'Unassigned') === lane) return;
+      if (!isLaneReassignTarget(dragged, lane)) return;
       onMoveStep({ ...dragged, responsibleJobTitle: lane === 'Unassigned' ? '' : lane });
       return;
     }
@@ -1007,7 +1029,10 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 styles.laneCell,
                 isValidDropTargetForCurrentDrag(step, lane) ? styles.validDropTarget : '',
                 isDragOverThisCell ? styles.dragOver : '',
-                isDragOverThisCell && !draggingNewShape
+                // No insert-position bar for a lane-reassignment drop - it
+                // doesn't reorder anything, so there's no before/after to
+                // show (see dragOverPosition).
+                isDragOverThisCell && !draggingNewShape && dragOverPosition !== 'reassign'
                   ? (dragOverPosition === 'before' ? styles.insertBefore : styles.insertAfter)
                   : '',
                 // A grid full of bare, empty cell outlines reads as visual
