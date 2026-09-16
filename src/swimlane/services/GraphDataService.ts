@@ -2,7 +2,7 @@
 import { IDataService, IBulkAddStepsResult } from './IDataService';
 import { IProcessStep, parseDependsOn, parseEdgeLabels, serializeEdgeLabels, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
-import { IRiskStatement, parseLinkedRisks, serializeLinkedRisks } from '../models/IRiskStatement';
+import { IRiskStatement, parseLinkedRisks, serializeLinkedRisks, nextRiskId } from '../models/IRiskStatement';
 import { IControlStatement, nextControlId } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
@@ -351,12 +351,16 @@ export class GraphDataService implements IDataService {
     const siteId = await this._resolveSiteId();
     const listId = await this._resolveListId(RISK_LIST_TITLE);
 
+    // Server-assigned, same as Control ID (see nextControlId) - overrides
+    // whatever risk.riskId was, callers no longer type/pass a real one.
+    const riskId = nextRiskId(await this.getRiskStatements());
+
     const fields: Record<string, string> = {};
     const set = (displayName: string, value: string | undefined): void => {
       const internalName = fieldMap[displayName];
       if (internalName && value !== undefined && value !== '') fields[internalName] = value;
     };
-    set('Risk ID', risk.riskId);
+    set('Risk ID', riskId);
     set('Category', risk.category);
     set('Risk Statement', risk.riskStatement);
     set('Root Cause', risk.rootCause);
@@ -367,7 +371,7 @@ export class GraphDataService implements IDataService {
     set('Function', risk.function);
 
     const created = await this._graph.post<GraphItem>(`/sites/${siteId}/lists/${listId}/items`, { fields });
-    return { ...risk, id: created.id };
+    return { ...risk, riskId, id: created.id };
   }
 
   public async getControlStatements(): Promise<IControlStatement[]> {

@@ -148,6 +148,9 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
         value={value.linkedRisks}
         onChange={links => set('linkedRisks', links)}
         dataService={dataService}
+        processStepId={processStepId}
+        processDescription={processDescription}
+        stepResponsibleJobTitle={value.responsibleJobTitle}
         onRiskCreated={onRiskCreated}
       />
       <ControlLinkPicker

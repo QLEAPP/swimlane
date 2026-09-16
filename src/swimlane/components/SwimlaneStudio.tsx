@@ -1144,6 +1144,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       <AddRiskModal
         isOpen={addRiskOpen}
         dataService={dataService}
+        riskStatements={riskStatements}
         onDismiss={() => setAddRiskOpen(false)}
         onCreated={handleRiskCreated}
       />

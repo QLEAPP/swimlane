@@ -1,7 +1,7 @@
 ﻿import { IDataService, IBulkAddStepsResult } from './IDataService';
 import { IProcessStep, parseDependsOn, nextUniqueId } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
-import { IRiskStatement, parseLinkedRisks } from '../models/IRiskStatement';
+import { IRiskStatement, parseLinkedRisks, nextRiskId } from '../models/IRiskStatement';
 import { IControlStatement, nextControlId } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
@@ -240,7 +240,10 @@ export class MockDataService implements IDataService {
   }
 
   public addRiskStatement(risk: Omit<IRiskStatement, 'id'>): Promise<IRiskStatement> {
-    const created: IRiskStatement = { ...risk, id: `mock-risk-${this._addedRisks.length + 1}` };
+    // Server-assigned, same as Control ID (see nextControlId) - overrides
+    // whatever risk.riskId was, callers no longer type/pass a real one.
+    const riskId = nextRiskId([...MOCK_RISKS, ...this._addedRisks]);
+    const created: IRiskStatement = { ...risk, riskId, id: `mock-risk-${this._addedRisks.length + 1}` };
     this._addedRisks.push(created);
     return Promise.resolve(created);
   }

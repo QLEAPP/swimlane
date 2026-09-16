@@ -8,6 +8,29 @@ export type RiskLevel = 'High' | 'Medium' | 'Low';
 // Function picker mixes this in alongside the real, data-derived values.
 export const GUARANTEED_FUNCTIONS = ['Operations'];
 
+// Standard COSO ERM risk-response categories (added 2026-09-16 at the
+// user's request - "risk response too a dropdown") - not a confirmed real
+// SharePoint choice list, just sensible fixed options so this is picked
+// rather than free-typed, same reasoning as GUARANTEED_FUNCTIONS above and
+// CONTROL_TYPE_OPTIONS in AddControlModal.tsx.
+export const GUARANTEED_RISK_RESPONSES = ['Avoid', 'Mitigate', 'Transfer', 'Accept'];
+
+/**
+ * Auto-generates the next Risk ID for a NEWLY created risk (e.g. "RSK-003"
+ * following "RSK-002") - added 2026-09-16 at the user's request, same
+ * reasoning and pattern as nextControlId in IControlStatement.ts: a real,
+ * unique, system-assigned ID rather than one someone could mistype, leave
+ * blank, or collide with another row.
+ */
+export function nextRiskId(risks: Array<{ riskId: string }>): string {
+  const pattern = /^RSK-(\d+)$/;
+  const max = risks.reduce((acc, r) => {
+    const match = pattern.exec((r.riskId || '').trim());
+    return match ? Math.max(acc, parseInt(match[1], 10)) : acc;
+  }, 0);
+  return `RSK-${String(max + 1).padStart(3, '0')}`;
+}
+
 /**
  * The real "risk register data" SharePoint list - confirmed columns as of
  * 2026-08-17 from a live screenshot of the list: Risk ID, Category, Risk

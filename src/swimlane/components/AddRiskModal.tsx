@@ -1,12 +1,18 @@
 import * as React from 'react';
-import { Modal, PrimaryButton, DefaultButton, TextField } from '@fluentui/react';
-import { IRiskStatement } from '../models/IRiskStatement';
+import { Modal, PrimaryButton, DefaultButton, TextField, Dropdown, IDropdownOption } from '@fluentui/react';
+import { IRiskStatement, GUARANTEED_FUNCTIONS, GUARANTEED_RISK_RESPONSES } from '../models/IRiskStatement';
 import { IDataService } from '../services/IDataService';
+import { APQC_CATEGORY_NAMES } from '../utils/apqcHierarchy';
 import styles from './AddHierarchyShellModal.module.scss';
+
+const CATEGORY_OPTIONS: IDropdownOption[] = Object.entries(APQC_CATEGORY_NAMES)
+  .sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10))
+  .map(([id, name]) => ({ key: id, text: `${id} - ${name}` }));
 
 export interface IAddRiskModalProps {
   isOpen: boolean;
   dataService: IDataService;
+  riskStatements: IRiskStatement[];
   onDismiss: () => void;
   onCreated: (created: IRiskStatement) => void;
 }
@@ -16,8 +22,21 @@ export interface IAddRiskModalProps {
 // enterprise register this app doesn't own (see the schema comment on
 // IDataService.addRiskStatement). All nine real columns are editable
 // here, same set getRiskStatements/RiskRegisterList already read.
-const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDismiss, onCreated }) => {
-  const [riskId, setRiskId] = React.useState('');
+//
+// Risk ID is NOT a field - auto-generated server-side (see nextRiskId),
+// same treatment as Control ID in AddControlModal, added 2026-09-16 at the
+// user's request so it can't be mistyped, left blank, or collide with
+// another row. Category is the APQC category the risk sits under (e.g.
+// "9 - Manage Financial Resources"), picked from the same fixed list the
+// rest of the app's hierarchy pickers use, rather than a free-typed risk
+// taxonomy label - changed the same day, same request. Function and Risk
+// response are pick-only too, same reasoning as Control's own Function/
+// Control type fields. This standalone form (opened from the Risk
+// Register tab itself, not from a step's edit panel) has no current
+// process/step to prepopulate APQC process area, Process, or Risk owner
+// from the way RiskLinkPicker's own "create a new risk" section can - see
+// the comment there.
+const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, riskStatements, onDismiss, onCreated }) => {
   const [category, setCategory] = React.useState('');
   const [apqcProcessArea, setApqcProcessArea] = React.useState('');
   const [process, setProcess] = React.useState('');
@@ -34,7 +53,6 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
 
   React.useEffect(() => {
     if (isOpen) {
-      setRiskId('');
       setCategory('');
       setApqcProcessArea('');
       setProcess('');
@@ -47,6 +65,16 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
     }
   }, [isOpen]);
 
+  const functionOptions: IDropdownOption[] = React.useMemo(
+    () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...riskStatements.map(r => r.function)].filter(Boolean))).sort().map(f => ({ key: f, text: f })),
+    [riskStatements]
+  );
+
+  const riskResponseOptions: IDropdownOption[] = React.useMemo(
+    () => Array.from(new Set([...GUARANTEED_RISK_RESPONSES, ...riskStatements.map(r => r.riskResponse)].filter(Boolean))).map(r => ({ key: r, text: r })),
+    [riskStatements]
+  );
+
   const trimmedStatement = riskStatement.trim();
   const canSubmit = trimmedStatement.length > 0 && !saving;
 
@@ -54,9 +82,10 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
     if (!canSubmit) return;
     setSaving(true);
     setError(undefined);
+    const categoryOption = CATEGORY_OPTIONS.find(o => o.key === category);
     dataService.addRiskStatement({
-      riskId: riskId.trim(),
-      category: category.trim(),
+      riskId: '', // ignored/overwritten server-side - see nextRiskId
+      category: categoryOption ? String(categoryOption.text) : '',
       apqcProcessArea: apqcProcessArea.trim(),
       process: process.trim(),
       function: riskFunction.trim(),
@@ -79,16 +108,21 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
     <Modal isOpen={isOpen} onDismiss={onDismiss} isBlocking={false} containerClassName={styles.modal}>
       <div className={styles.header}>
         <h3>Add a risk</h3>
-        <p>Writes a new row into the risk register - Risk Statement is the only required field.</p>
+        <p>Writes a new row into the risk register - Risk Statement is the only required field. Risk ID is assigned automatically.</p>
       </div>
 
       {error && <p className={styles.error}>{error}</p>}
 
-      <TextField label="Risk ID" placeholder="e.g. OP-042" value={riskId} onChange={(_e, v) => setRiskId(v || '')} />
-      <TextField label="Category" placeholder="e.g. Operational / Financial Controls" value={category} onChange={(_e, v) => setCategory(v || '')} />
+      <Dropdown
+        label="Category"
+        placeholder="Choose the APQC category..."
+        selectedKey={category || null}
+        options={CATEGORY_OPTIONS}
+        onChange={(_e, option) => setCategory(option ? String(option.key) : '')}
+      />
       <TextField
         label="APQC process area"
-        placeholder="e.g. Manage Financial Resources"
+        placeholder="e.g. 9.6.1"
         value={apqcProcessArea}
         onChange={(_e, v) => setApqcProcessArea(v || '')}
       />
@@ -98,11 +132,12 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
         value={process}
         onChange={(_e, v) => setProcess(v || '')}
       />
-      <TextField
+      <Dropdown
         label="Function"
-        placeholder="e.g. Finance"
-        value={riskFunction}
-        onChange={(_e, v) => setRiskFunction(v || '')}
+        placeholder="Choose from the list..."
+        selectedKey={riskFunction || null}
+        options={functionOptions}
+        onChange={(_e, option) => setRiskFunction(option ? String(option.key) : '')}
       />
       <TextField
         label="Risk statement"
@@ -113,11 +148,12 @@ const AddRiskModal: React.FC<IAddRiskModalProps> = ({ isOpen, dataService, onDis
         rows={3}
       />
       <TextField label="Root cause" placeholder="Why this risk exists" value={rootCause} onChange={(_e, v) => setRootCause(v || '')} multiline rows={2} />
-      <TextField
+      <Dropdown
         label="Risk response"
-        placeholder="e.g. Mitigate"
-        value={riskResponse}
-        onChange={(_e, v) => setRiskResponse(v || '')}
+        placeholder="Choose from the list..."
+        selectedKey={riskResponse || null}
+        options={riskResponseOptions}
+        onChange={(_e, option) => setRiskResponse(option ? String(option.key) : '')}
       />
       <TextField
         label="Risk owner"

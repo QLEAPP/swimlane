@@ -1,14 +1,29 @@
 import * as React from 'react';
 import { Dropdown, IDropdownOption, DefaultButton, PrimaryButton, IconButton, TextField } from '@fluentui/react';
-import { IRiskStatement, IRiskLink, RiskLevel, GUARANTEED_FUNCTIONS } from '../models/IRiskStatement';
+import { IRiskStatement, IRiskLink, RiskLevel, GUARANTEED_FUNCTIONS, GUARANTEED_RISK_RESPONSES } from '../models/IRiskStatement';
+import { getProcessId } from '../models/IProcessStep';
 import { IDataService } from '../services/IDataService';
+import { getCategoryId, APQC_CATEGORY_NAMES } from '../utils/apqcHierarchy';
 import styles from './RiskLinkPicker.module.scss';
+
+const CATEGORY_OPTIONS: IDropdownOption[] = Object.entries(APQC_CATEGORY_NAMES)
+  .sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10))
+  .map(([id, name]) => ({ key: id, text: `${id} - ${name}` }));
 
 export interface IRiskLinkPickerProps {
   riskStatements: IRiskStatement[];
   value: IRiskLink[];
   onChange: (value: IRiskLink[]) => void;
   dataService: IDataService;
+  // The step's own Process Step ID/description/Responsible - used only by
+  // the inline "create a new risk" section below (added 2026-09-16 at the
+  // user's request) to prepopulate Category/APQC process area/Process/Risk
+  // owner from context that's already known, rather than asking for it
+  // again. AddRiskModal (opened from the Risk Register tab directly, with
+  // no current step) can't do the same - see the comment there.
+  processStepId: string;
+  processDescription: string;
+  stepResponsibleJobTitle: string;
   // Fires after a brand-new risk is created via the inline "create"
   // section below - distinct from onChange (which only ever adds an
   // already-existing risk's id to THIS step's own linkedRisks) since this
@@ -41,7 +56,9 @@ const SEVERITY_CLASS: Record<RiskLevel, string> = {
 // Filters by Function rather than Category (changed 2026-09-08 at the
 // user's request) - Function is the grouping people actually think in
 // terms of when tying a risk to a step, Category wasn't.
-const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value, onChange, dataService, onRiskCreated }) => {
+const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({
+  riskStatements, value, onChange, dataService, processStepId, processDescription, stepResponsibleJobTitle, onRiskCreated
+}) => {
   const [riskFunction, setRiskFunction] = React.useState<string | undefined>(undefined);
   const [riskId, setRiskId] = React.useState<string | undefined>(undefined);
   const [severity, setSeverity] = React.useState<RiskLevel | undefined>(undefined);
@@ -51,15 +68,26 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
   // already-existing one above, same reveal-on-demand pattern as
   // ControlLinkPicker's own "+ Create a new control") rather than having
   // to leave the step, go to the Risk Register tab, add it there, then
-  // come back to link it. Every field and the "only Risk Statement is
-  // required" rule below matches AddRiskModal exactly - same real
-  // register, same rules, whichever door you come in through (confirmed
-  // at the user's request: "this should reflect on the full list... same
-  // rules as per the full list").
+  // come back to link it. Field-by-field rules changed 2026-09-16 at the
+  // user's request:
+  //  - Risk ID: not a field at all - auto-generated server-side (see
+  //    nextRiskId), same as AddRiskModal now does too.
+  //  - Category: the step's own APQC category, prepopulated (see
+  //    handleOpenCreate) since it's already known from processStepId -
+  //    still changeable via the dropdown, not locked.
+  //  - APQC process area: derived straight from processStepId (see
+  //    derivedApqcProcessArea below) and shown read-only - there's nothing
+  //    to ask for, the step already IS that process.
+  //  - Process: prepopulated from processDescription but still a plain
+  //    typed field - the exact wording can differ from the swimlane's own
+  //    label (see ControlLinkPicker's own process-matching comment).
+  //  - Function / Risk response: pick-only dropdowns instead of free text.
+  //  - Risk owner: prepopulated from the step's own Responsible value
+  //    (stepResponsibleJobTitle) - "based on the role already linked in
+  //    the swimlane" - still editable in case this risk's real owner is a
+  //    different role than whoever executes the step.
   const [creating, setCreating] = React.useState(false);
-  const [newRiskId, setNewRiskId] = React.useState('');
   const [newCategory, setNewCategory] = React.useState('');
-  const [newApqcProcessArea, setNewApqcProcessArea] = React.useState('');
   const [newProcess, setNewProcess] = React.useState('');
   const [newFunction, setNewFunction] = React.useState('');
   const [newRiskStatement, setNewRiskStatement] = React.useState('');
@@ -74,10 +102,34 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
   const [creatingSaving, setCreatingSaving] = React.useState(false);
   const [creatingError, setCreatingError] = React.useState<string | undefined>(undefined);
 
+  // Always derived, never a separate field to fill in - see the comment
+  // on the "create" section above.
+  const derivedApqcProcessArea = getProcessId(processStepId);
+
+  const handleOpenCreate = (): void => {
+    setCreating(true);
+    setNewCategory(getCategoryId(processStepId));
+    setNewProcess(processDescription);
+    setNewRiskOwner(stepResponsibleJobTitle || '');
+  };
+
+  const handleCancelCreate = (): void => {
+    setCreating(false);
+    setNewCategory(''); setNewProcess(''); setNewFunction('');
+    setNewRiskStatement(''); setNewRootCause(''); setNewRiskResponse(''); setNewRiskOwner('');
+    setNewSeverity(undefined); setCreatingError(undefined);
+  };
+
   const risksById = React.useMemo(() => new Map(riskStatements.map(r => [r.id, r])), [riskStatements]);
 
   const functionOptions: IDropdownOption[] = React.useMemo(
     () => Array.from(new Set([...GUARANTEED_FUNCTIONS, ...riskStatements.map(r => r.function)].filter(Boolean))).sort().map(f => ({ key: f, text: f })),
+    [riskStatements]
+  );
+
+  // Used only by the "create a new risk" section below.
+  const riskResponseOptions: IDropdownOption[] = React.useMemo(
+    () => Array.from(new Set([...GUARANTEED_RISK_RESPONSES, ...riskStatements.map(r => r.riskResponse)].filter(Boolean))).map(r => ({ key: r, text: r })),
     [riskStatements]
   );
 
@@ -118,10 +170,11 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
     if (!canCreate || !newSeverity) return;
     setCreatingSaving(true);
     setCreatingError(undefined);
+    const categoryOption = CATEGORY_OPTIONS.find(o => o.key === newCategory);
     dataService.addRiskStatement({
-      riskId: newRiskId.trim(),
-      category: newCategory.trim(),
-      apqcProcessArea: newApqcProcessArea.trim(),
+      riskId: '', // ignored/overwritten server-side - see nextRiskId
+      category: categoryOption ? String(categoryOption.text) : '',
+      apqcProcessArea: derivedApqcProcessArea,
       process: newProcess.trim(),
       function: newFunction.trim(),
       riskStatement: trimmedNewRiskStatement,
@@ -137,17 +190,7 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
         // is that it's already tied to this exact step, no separate
         // linking step needed afterward.
         onChange([...value, { riskId: created.id, severity: newSeverity }]);
-        setNewRiskId('');
-        setNewCategory('');
-        setNewApqcProcessArea('');
-        setNewProcess('');
-        setNewFunction('');
-        setNewRiskStatement('');
-        setNewRootCause('');
-        setNewRiskResponse('');
-        setNewRiskOwner('');
-        setNewSeverity(undefined);
-        setCreating(false);
+        handleCancelCreate();
         setCreatingSaving(false);
       })
       .catch((err: Error) => {
@@ -220,20 +263,27 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
       )}
 
       {!creating ? (
-        <DefaultButton text="+ Create a new risk" onClick={() => setCreating(true)} />
+        <DefaultButton text="+ Create a new risk" onClick={handleOpenCreate} />
       ) : (
         <div className={styles.createBox}>
           {creatingError && <p className={styles.empty}>{creatingError}</p>}
-          <TextField label="Risk ID" placeholder="e.g. OP-042" value={newRiskId} onChange={(_e, v) => setNewRiskId(v || '')} />
-          <TextField label="Category" placeholder="e.g. Operational / Financial Controls" value={newCategory} onChange={(_e, v) => setNewCategory(v || '')} />
-          <TextField
-            label="APQC process area"
-            placeholder="e.g. Manage Financial Resources"
-            value={newApqcProcessArea}
-            onChange={(_e, v) => setNewApqcProcessArea(v || '')}
+          <p className={styles.empty}>Risk ID will be assigned automatically (RSK-XXX) - not something you type.</p>
+          <Dropdown
+            label="Category"
+            placeholder="Choose the APQC category..."
+            selectedKey={newCategory || null}
+            options={CATEGORY_OPTIONS}
+            onChange={(_e, option) => setNewCategory(option ? String(option.key) : '')}
           />
+          <TextField label="APQC process area" value={derivedApqcProcessArea} disabled />
           <TextField label="Process" placeholder="e.g. Process accounts payable (AP)" value={newProcess} onChange={(_e, v) => setNewProcess(v || '')} />
-          <TextField label="Function" placeholder="e.g. Finance" value={newFunction} onChange={(_e, v) => setNewFunction(v || '')} />
+          <Dropdown
+            label="Function"
+            placeholder="Choose from the list..."
+            selectedKey={newFunction || null}
+            options={functionOptions}
+            onChange={(_e, option) => setNewFunction(option ? String(option.key) : '')}
+          />
           <TextField
             label="Risk statement"
             placeholder="Describe the risk"
@@ -243,8 +293,19 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
             rows={3}
           />
           <TextField label="Root cause" placeholder="Why this risk exists" value={newRootCause} onChange={(_e, v) => setNewRootCause(v || '')} multiline rows={2} />
-          <TextField label="Risk response" placeholder="e.g. Mitigate" value={newRiskResponse} onChange={(_e, v) => setNewRiskResponse(v || '')} />
-          <TextField label="Risk owner" placeholder="e.g. Finance Manager" value={newRiskOwner} onChange={(_e, v) => setNewRiskOwner(v || '')} />
+          <Dropdown
+            label="Risk response"
+            placeholder="Choose from the list..."
+            selectedKey={newRiskResponse || null}
+            options={riskResponseOptions}
+            onChange={(_e, option) => setNewRiskResponse(option ? String(option.key) : '')}
+          />
+          <TextField
+            label="Risk owner"
+            placeholder="e.g. Finance Manager"
+            value={newRiskOwner}
+            onChange={(_e, v) => setNewRiskOwner(v || '')}
+          />
           <Dropdown
             label="Severity (for this step's link)"
             placeholder="Severity"
@@ -254,16 +315,7 @@ const RiskLinkPicker: React.FC<IRiskLinkPickerProps> = ({ riskStatements, value,
           />
           <div className={styles.addRow}>
             <PrimaryButton text={creatingSaving ? 'Adding...' : '+ Add risk'} onClick={handleCreate} disabled={!canCreate} />
-            <DefaultButton
-              text="Cancel"
-              disabled={creatingSaving}
-              onClick={() => {
-                setCreating(false);
-                setNewRiskId(''); setNewCategory(''); setNewApqcProcessArea(''); setNewProcess(''); setNewFunction('');
-                setNewRiskStatement(''); setNewRootCause(''); setNewRiskResponse(''); setNewRiskOwner('');
-                setNewSeverity(undefined); setCreatingError(undefined);
-              }}
-            />
+            <DefaultButton text="Cancel" disabled={creatingSaving} onClick={handleCancelCreate} />
           </div>
         </div>
       )}
