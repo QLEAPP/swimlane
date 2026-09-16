@@ -262,6 +262,12 @@ const ControlLinkPicker: React.FC<IControlLinkPickerProps> = ({
           ) : (
             <div className={styles.createBox}>
               {creatingError && <p className={styles.empty}>{creatingError}</p>}
+              {/* Stated explicitly (added 2026-09-16 at the user's request -
+                  "so people don't wonder about it") - AddControlModal
+                  already said this, this popup's own "create" section
+                  hadn't, even though it goes through the exact same
+                  auto-generation (see nextControlId). */}
+              <p className={styles.empty}>Control ID will be assigned automatically (CTL-XXX) - not something you type.</p>
               <ComboBox
                 label="Function"
                 placeholder="Choose from the list..."
