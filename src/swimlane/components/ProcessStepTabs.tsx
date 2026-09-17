@@ -5,7 +5,11 @@ import styles from './ProcessStepTabs.module.scss';
 
 export interface IProcessStepTabsProps {
   steps: IProcessStep[]; // all steps for the currently selected Process ID
-  selectedStepId: string | undefined; // undefined = "All" (top-level view)
+  // undefined only ever transiently - true while there are no sections yet
+  // to select, or for the one render before the auto-select effect below
+  // lands on the first real one. Never a real, user-choosable "All" state
+  // any more (removed 2026-09-17 at the user's request) - see the effect.
+  selectedStepId: string | undefined;
   onSelect: (stepId: string | undefined) => void;
   // Opens the lightweight section-creation flow (see AddStepSectionModal)
   // - undefined when there's nowhere sensible to add one yet (no Progress
@@ -22,17 +26,34 @@ export interface IProcessStepTabsProps {
   onRenameSection?: (stepId: string, currentName: string) => void;
 }
 
-// Drill-down level of the two confirmed navigation levels: "All" shows
-// every row under the Process ID as one continuous flow; each tab
-// narrows to a single Process Step ID.
+// Drill-down level: each tab narrows to a single Process Step ID (a
+// "section"). There used to be an "All" tab here showing every section's
+// steps combined, removed 2026-09-17 at the user's request - a section is
+// its own real, scoped part of the process (see AddStepSectionModal), not
+// meant to be viewed merged together with unrelated ones the way "All"
+// did, and it was a common source of confused step counts (steps from
+// every section adding up under one number). See the auto-select effect
+// below for how a real tab always ends up chosen instead.
 const ProcessStepTabs: React.FC<IProcessStepTabsProps> = ({ steps, selectedStepId, onSelect, onAddNew, onRenameSection }) => {
   const stepIds = React.useMemo(
     () => Array.from(new Set(steps.map(s => s.processStepId))).sort(compareProcessStepIds),
     [steps]
   );
 
-  const countFor = (stepId: string | undefined): number =>
-    stepId === undefined ? steps.length : steps.filter(s => s.processStepId === stepId).length;
+  // Lands on the first real section whenever nothing valid is currently
+  // selected - covers the initial mount, switching to a Process ID/region
+  // that resets selectedStepId back to undefined, and a previously-
+  // selected section having just been deleted out from under it. Does
+  // nothing when stepIds is empty (no sections exist yet at all) - there's
+  // genuinely nothing to select until "+ Add section" creates one.
+  React.useEffect(() => {
+    if (stepIds.length === 0) return;
+    if (selectedStepId === undefined || !stepIds.includes(selectedStepId)) {
+      onSelect(stepIds[0]);
+    }
+  }, [stepIds, selectedStepId, onSelect]);
+
+  const countFor = (stepId: string): number => steps.filter(s => s.processStepId === stepId).length;
 
   // Same "first matching step wins" precedence used everywhere else a
   // section needs a representative name - every row sharing a Process
@@ -42,12 +63,7 @@ const ProcessStepTabs: React.FC<IProcessStepTabsProps> = ({ steps, selectedStepI
 
   return (
     <div className={styles.tabs}>
-      <button
-        className={`${styles.tab} ${selectedStepId === undefined ? styles.active : ''}`}
-        onClick={() => onSelect(undefined)}
-      >
-        All <span className={styles.count}>{countFor(undefined)}</span>
-      </button>
+      {stepIds.length === 0 && <p className={styles.empty}>No sections yet - add one below.</p>}
       {stepIds.map(stepId => (
         <div className={styles.tabWrap} key={stepId}>
           <button

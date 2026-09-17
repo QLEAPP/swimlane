@@ -5,6 +5,15 @@
   margin-bottom: 14px;
 }
 
+// Shown only when a Process ID/region has no sections at all yet (see the
+// "All" tab's removal in ProcessStepTabs.tsx) - there's nothing left to
+// click here until "+ Add section" creates the first real one.
+.empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
 .tab {
   background: var(--surface);
   border: 1px solid var(--border);
