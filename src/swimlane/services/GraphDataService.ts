@@ -103,7 +103,18 @@ type GraphItem = {
 
 export class GraphDataService implements IDataService {
   private _graph: GraphClient;
-  private _siteId: string | undefined;
+  private _siteIdPromise: Promise<string> | undefined;
+  // Every distinct list title this session resolves shares the SAME
+  // underlying "every list on this site" collection - fetching that
+  // collection once and reusing it (see _resolveAllLists) instead of
+  // re-fetching it per list title fixes a real confirmed slow-start bug:
+  // SwimlaneStudio's initial loadAll() fires ~10 getXxx() calls in
+  // parallel (see the Promise.allSettled there), each resolving a
+  // DIFFERENT list title, so before this fix each one independently
+  // re-fetched the site's entire list collection - 10 redundant paginated
+  // Graph calls firing at once on every single app load, on top of an
+  // equally redundant site-id lookup (see _resolveSiteId below).
+  private _allListsPromise: Promise<Array<{ id: string; displayName: string }>> | undefined;
   private _listIdCache = new Map<string, string>();
   private _fieldMapCache = new Map<string, FieldMap>();
 
@@ -121,20 +132,47 @@ export class GraphDataService implements IDataService {
     this._currentUserName = currentUserName;
   }
 
-  private async _resolveSiteId(): Promise<string> {
-    if (this._siteId) return this._siteId;
-    const site = await this._graph.get<{ id: string }>(`/sites/${SHAREPOINT_SITE_HOSTNAME}:${SHAREPOINT_SITE_PATH}`);
-    this._siteId = site.id;
-    return site.id;
+  // Memoizes the PROMISE, not just the eventual value - loadAll's ~10
+  // parallel getXxx() calls all invoke this within the same tick, well
+  // before the first one resolves, so caching only the resolved value
+  // (the previous `if (this._siteId) return this._siteId` check) let every
+  // one of them see it still unset and independently fire its own
+  // redundant site lookup. Sharing one in-flight promise means the other
+  // nine just await it too - same pattern GraphClient.getToken already
+  // uses for the same reason.
+  private _resolveSiteId(): Promise<string> {
+    if (!this._siteIdPromise) {
+      // Cleared on failure, not just left rejected forever - a transient
+      // network blip on the very first load shouldn't permanently poison
+      // every later retry (e.g. loadAll() re-running after a backfill)
+      // for the rest of the session the way a cached rejection would.
+      this._siteIdPromise = this._graph
+        .get<{ id: string }>(`/sites/${SHAREPOINT_SITE_HOSTNAME}:${SHAREPOINT_SITE_PATH}`)
+        .then(site => site.id)
+        .catch(err => { this._siteIdPromise = undefined; throw err; });
+    }
+    return this._siteIdPromise;
+  }
+
+  // Same in-flight-promise-sharing reasoning as _resolveSiteId above -
+  // every distinct list title's _resolveListId call needs this same
+  // site-wide collection, so the first call to reach here starts the
+  // fetch and every other one just awaits that same promise instead of
+  // each re-fetching the whole site's list collection from scratch.
+  private _resolveAllLists(): Promise<Array<{ id: string; displayName: string }>> {
+    if (!this._allListsPromise) {
+      // Same cleared-on-failure reasoning as _resolveSiteId above.
+      this._allListsPromise = this._resolveSiteId()
+        .then(siteId => this._graph.getAllPages<{ id: string; displayName: string }>(`/sites/${siteId}/lists?$select=id,displayName`))
+        .catch(err => { this._allListsPromise = undefined; throw err; });
+    }
+    return this._allListsPromise;
   }
 
   private async _resolveListId(listTitle: string): Promise<string> {
     const cached = this._listIdCache.get(listTitle);
     if (cached) return cached;
-    const siteId = await this._resolveSiteId();
-    const lists = await this._graph.getAllPages<{ id: string; displayName: string }>(
-      `/sites/${siteId}/lists?$select=id,displayName`
-    );
+    const lists = await this._resolveAllLists();
     const match = lists.find(l => l.displayName === listTitle);
     if (!match) {
       const available = lists.map(l => l.displayName).join(', ') || '(no lists found - check Sites.ReadWrite.All was actually granted)';
