@@ -1,6 +1,6 @@
 ﻿import * as React from 'react';
 import { Modal, PrimaryButton, DefaultButton, TextField } from '@fluentui/react';
-import { IProcessStep } from '../models/IProcessStep';
+import { IProcessStep, nextSectionId } from '../models/IProcessStep';
 import { IDataService } from '../services/IDataService';
 import styles from './AddStepSectionModal.module.scss';
 
@@ -15,6 +15,12 @@ export interface IAddStepSectionModalProps {
   // this specific section, so a new section inherits them rather than
   // asking again (same reasoning as handleAddStep's own fallback logic).
   referenceStep: IProcessStep | undefined;
+  // The current region's own steps (not every region) - used only to work
+  // out the next available Process Step ID when that field is left blank
+  // (see nextSectionId). Same region-scoping reasoning as
+  // stepsInSameRegionAs elsewhere: a different region reusing the same
+  // number is a separate, unrelated section, not a collision to avoid.
+  stepsInRegion: IProcessStep[];
   region: string | undefined; // the currently-selected flow region, if any - auto-tags the new section the same way "Add a step" does
   dataService: IDataService;
   onDismiss: () => void;
@@ -37,7 +43,7 @@ export interface IAddStepSectionModalProps {
 // the normal edit panel for everything else (Action, Risk, Responsible,
 // Depends on...).
 const AddStepSectionModal: React.FC<IAddStepSectionModalProps> = ({
-  isOpen, idPrefix, referenceStep, region, dataService, onDismiss, onCreated
+  isOpen, idPrefix, referenceStep, stepsInRegion, region, dataService, onDismiss, onCreated
 }) => {
   const [id, setId] = React.useState('');
   const [name, setName] = React.useState('');
@@ -54,7 +60,15 @@ const AddStepSectionModal: React.FC<IAddStepSectionModalProps> = ({
   }, [isOpen, idPrefix]);
 
   const trimmedId = id.trim();
-  const idLooksValid = /^\d+(\.\d+){3}$/.test(trimmedId);
+  // Not compulsory (changed 2026-09-18 at the user's request - "if I just
+  // save a title that should allow me to work") - blank means either the
+  // field's never been touched (still just idPrefix, e.g. "9.6.1.") or
+  // genuinely emptied out; either way, nothing beyond the known prefix has
+  // actually been typed, so handleCreate below auto-assigns the next
+  // available number instead (see nextSectionId).
+  const withoutPrefix = trimmedId.startsWith(idPrefix) ? trimmedId.slice(idPrefix.length) : trimmedId;
+  const isBlankId = withoutPrefix.trim().length === 0;
+  const idLooksValid = isBlankId || /^\d+(\.\d+){3}$/.test(trimmedId);
   const trimmedName = name.trim();
   const canSubmit = idLooksValid && trimmedName.length > 0 && !saving;
 
@@ -62,10 +76,11 @@ const AddStepSectionModal: React.FC<IAddStepSectionModalProps> = ({
     if (!canSubmit) return;
     setSaving(true);
     setError(undefined);
+    const finalId = isBlankId ? nextSectionId(idPrefix, stepsInRegion) : trimmedId;
     dataService.addProcessStep({
       apqcTitle: referenceStep?.apqcTitle || idPrefix.replace(/\.$/, ''),
       processDescription: referenceStep?.processDescription || '',
-      processStepId: trimmedId,
+      processStepId: finalId,
       processStepName: trimmedName,
       actionType: 'Execute (Within Limits)',
       action: '',
@@ -96,16 +111,17 @@ const AddStepSectionModal: React.FC<IAddStepSectionModalProps> = ({
     <Modal isOpen={isOpen} onDismiss={onDismiss} isBlocking={false} containerClassName={styles.modal}>
       <div className={styles.header}>
         <h3>Add a section</h3>
-        <p>Just an ID and a name - add real steps to it afterward the same way you would to any other section.</p>
+        <p>Just a name is enough - add real steps to it afterward the same way you would to any other section.</p>
       </div>
 
       {error && <p className={styles.error}>{error}</p>}
 
       <TextField
-        label="Process Step ID"
+        label="Process Step ID (optional - not compulsory)"
+        description="Leave as-is (or clear it) to have the next number assigned automatically."
         value={id}
         onChange={(_e, v) => setId(v || '')}
-        errorMessage={trimmedId.length > 0 && !idLooksValid ? `Needs exactly 4 dot-separated numbers, e.g. ${idPrefix}1` : undefined}
+        errorMessage={!isBlankId && !idLooksValid ? `Needs exactly 4 dot-separated numbers, e.g. ${idPrefix}1 - or leave it blank/as-is to auto-assign one` : undefined}
       />
       <TextField
         label="Section name"

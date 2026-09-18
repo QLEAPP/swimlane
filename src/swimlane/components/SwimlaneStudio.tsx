@@ -1162,6 +1162,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         isOpen={addSectionOpen}
         idPrefix={selectedProcessId ? `${selectedProcessId}.` : ''}
         referenceStep={stepsInProcessId[0]}
+        stepsInRegion={stepsInRegion}
         region={selectedFlowRegion}
         dataService={dataService}
         onDismiss={() => setAddSectionOpen(false)}

@@ -105,6 +105,25 @@ export function nextUniqueId(steps: Array<{ uniqueId?: string }>): string {
 }
 
 /**
+ * Next available 4th-segment (Activity/section) number under `idPrefix`
+ * (e.g. "9.6.1." -> "9.6.1.4") - added 2026-09-18 at the user's request so
+ * a new section's Process Step ID isn't compulsory to type by hand at
+ * all; leaving it blank in AddStepSectionModal falls back to this. Scoped
+ * to `stepsInScope` (meant to be the CURRENT region's own steps, not
+ * every region) - a different region reusing the same number is a
+ * normal, separate section (see stepsInSameRegionAs in
+ * SwimlaneStudio.tsx), not a collision this needs to avoid.
+ */
+export function nextSectionId(idPrefix: string, stepsInScope: Array<{ processStepId: string }>): string {
+  const used = stepsInScope
+    .filter(s => s.processStepId.startsWith(idPrefix))
+    .map(s => parseInt(s.processStepId.slice(idPrefix.length), 10))
+    .filter(n => !isNaN(n));
+  const max = used.length > 0 ? Math.max(...used) : 0;
+  return `${idPrefix}${max + 1}`;
+}
+
+/**
  * Process ID groups a continuous flow of Process Step IDs (e.g. 9.6.1
  * contains 9.6.1.1 through 9.6.1.6 as one flow). There is no separate
  * SharePoint column for it - confirmed design rule is that it's always
