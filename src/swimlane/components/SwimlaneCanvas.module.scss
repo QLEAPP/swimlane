@@ -1,7 +1,19 @@
 ﻿.canvasToolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 8px;
+}
+
+// Empty (no children rendered) whenever nothing is multi-selected - still
+// present in the DOM so canvasToolbar's space-between keeps Export to PDF
+// flush right exactly as before, same as with only that one button.
+.multiSelectBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .canvas {

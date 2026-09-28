@@ -51,6 +51,13 @@ export interface ISwimlaneCanvasProps {
   onLabelEdge: (toRowId: string, token: string, label: string) => void;
   onEditStep: (step: IProcessStep) => void;
   onDeleteStep: (stepId: string) => void;
+  // Batch delete for an ad-hoc, ctrl/cmd-click multi-selection (see
+  // multiSelectedIds below) - added 2026-09-28 at the user's request
+  // ("drop more than one step in a row"). Goes through the same
+  // 'bulkDelete' undo action as "delete this whole flow"/"delete this
+  // section" already use in SwimlaneStudio.tsx, just with an arbitrary
+  // set of step ids instead of every step in a flow/section.
+  onDeleteSteps: (stepIds: string[]) => void;
   // Drag-and-drop: dropping a step onto another step's cell moves it to
   // that lane and re-sequences it to sit right after that step - within
   // its current section, or into a DIFFERENT one if the target cell
@@ -126,7 +133,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated, onRiskCreated,
-  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
+  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onDeleteSteps, onMoveStep, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
   swimlaneStage, stageSetBy, onToggleStage
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
@@ -134,6 +141,13 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const highwaySpacerRef = React.useRef<HTMLDivElement>(null);
   const nodeRefs = React.useRef(new Map<string, HTMLDivElement>());
   const [edgeGeometry, setEdgeGeometry] = React.useState<IEdgeGeometry[]>([]);
+  // Ad-hoc multi-selection for "drop more than one step in a row" - kept
+  // entirely separate from selectedNodeId (which means "this step's edit
+  // panel is open"); a plain click still opens one step to edit as before,
+  // ctrl/cmd/shift-click instead toggles that step in this set without
+  // opening anything. Cleared whenever a plain click or a bulk delete
+  // happens (see handleNodeClick/handleDeleteMultiSelected).
+  const [multiSelectedIds, setMultiSelectedIds] = React.useState<Set<string>>(new Set());
   // Whether any edge in the CURRENT view actually needs the reserved
   // cross-lane highway strip (see the .highwaySpacer comment) - most
   // filtered views (e.g. drilled into one Process ID with only 1-2 lanes)
@@ -877,7 +891,30 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     return () => window.removeEventListener('resize', measureEdges);
   }, [measureEdges, needsHighwayStrip, lanes]);
 
-  const handleNodeClick = (step: IProcessStep): void => {
+  // ctrl/cmd/shift-click toggles multi-selection instead of opening the
+  // edit panel - lets several steps be marked for the bulk delete bar
+  // below without a separate "select mode" to turn on/off first.
+  const toggleMultiSelect = (stepId: string): void => {
+    setMultiSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(stepId)) next.delete(stepId); else next.add(stepId);
+      return next;
+    });
+  };
+
+  const handleDeleteMultiSelected = (): void => {
+    if (multiSelectedIds.size === 0) return;
+    onDeleteSteps(Array.from(multiSelectedIds));
+    setMultiSelectedIds(new Set());
+  };
+
+  const handleNodeClick = (step: IProcessStep, e?: React.MouseEvent): void => {
+    if (e && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+      if (isLocked) return;
+      toggleMultiSelect(step.id);
+      return;
+    }
+    if (multiSelectedIds.size > 0) setMultiSelectedIds(new Set());
     const deselecting = selectedNodeId === step.id;
     setSelectedNodeId(deselecting ? undefined : step.id);
     setDraftLabels({});
@@ -1010,6 +1047,19 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   return (
     <>
       <div className={styles.canvasToolbar}>
+        <div className={styles.multiSelectBar}>
+          {multiSelectedIds.size > 0 && !isLocked && (
+            <>
+              <span>{multiSelectedIds.size} step{multiSelectedIds.size === 1 ? '' : 's'} selected</span>
+              <DefaultButton text="Clear" onClick={() => setMultiSelectedIds(new Set())} />
+              <DefaultButton
+                text={`Delete ${multiSelectedIds.size}`}
+                iconProps={{ iconName: 'Delete', styles: { root: { color: 'var(--risk-high)' } } }}
+                onClick={handleDeleteMultiSelected}
+              />
+            </>
+          )}
+        </div>
         <DefaultButton
           text={exporting ? 'Exporting…' : 'Export to PDF'}
           iconProps={{ iconName: 'PDF' }}
@@ -1257,7 +1307,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                         linkedRiskSeverity={worstLinkedSeverity(step.linkedRisks)}
                         linkedRiskCount={(step.linkedRisks || []).length}
                         selected={selectedNodeId === step.id}
-                        onClick={() => handleNodeClick(step)}
+                        multiSelected={multiSelectedIds.has(step.id)}
+                        onClick={e => handleNodeClick(step, e)}
                         // Editing UI, not diagram content - hidden during
                         // PDF export the same way empty cells are (see
                         // cellClassName above), just via not rendering it

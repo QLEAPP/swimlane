@@ -13,7 +13,15 @@ export interface IShapeNodeProps {
   linkedRiskSeverity?: RiskLevel;
   linkedRiskCount?: number;
   selected?: boolean; // true while this node's connections are being shown/labeled
-  onClick?: () => void;
+  // true while this node is part of an ad-hoc ctrl/cmd/shift-click
+  // multi-selection (see multiSelectedIds in SwimlaneCanvas.tsx) - a
+  // separate highlight from `selected`, since a step can be marked for
+  // bulk delete without its edit panel being open at all.
+  multiSelected?: boolean;
+  // Takes the click event (not just a bare callback) so the caller can
+  // check ctrl/cmd/shift to distinguish "open this step to edit" from
+  // "toggle this step in the multi-selection" - see handleNodeClick.
+  onClick?: (e: React.MouseEvent) => void;
   // Drag-to-connect: a small handle rendered only when this is provided,
   // dragging it starts a new dependency link FROM this step - see
   // connectingFromStepId in SwimlaneCanvas.tsx. Kept as its own nested
@@ -46,7 +54,7 @@ const MARKER_CLASS: Record<RiskLevel, string> = {
 // color too (orange/green) so they stand out at a glance among a diagram
 // full of default-blue process/document shapes - see ShapeNode.module.scss.
 const ShapeNode: React.FC<IShapeNodeProps> = ({
-  label, shape, linkedRiskSeverity, linkedRiskCount, selected, onClick, onConnectorDragStart, onConnectorDragEnd, connectable
+  label, shape, linkedRiskSeverity, linkedRiskCount, selected, multiSelected, onClick, onConnectorDragStart, onConnectorDragEnd, connectable
 }) => {
   const className = [
     styles.shapeNode,
@@ -55,11 +63,12 @@ const ShapeNode: React.FC<IShapeNodeProps> = ({
     shape === 'process' ? styles.process : '',
     shape === 'document' ? styles.document : '',
     selected ? styles.selected : '',
+    multiSelected ? styles.multiSelected : '',
     connectable ? styles.connectable : ''
   ].filter(Boolean).join(' ');
 
   return (
-    <div className={className} onClick={onClick} title={label}>
+    <div className={className} onClick={e => onClick?.(e)} title={label}>
       {/* Carries the shape's actual visible fill/border/clip-path -
           separated from the outer div so corner badges (riskMarker,
           connectorHandle) can sit OUTSIDE what gets clipped. clip-path

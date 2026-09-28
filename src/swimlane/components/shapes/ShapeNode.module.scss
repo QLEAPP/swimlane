@@ -63,6 +63,14 @@
   box-shadow: 0 0 0 3px var(--blue), 0 4px 10px rgba(16, 24, 40, 0.22);
 }
 
+// Ad-hoc ctrl/cmd/shift-click multi-selection (see multiSelectedIds in
+// SwimlaneCanvas.tsx) - red, not blue, since its only purpose right now is
+// marking steps for the bulk delete bar, distinct from .selected (which
+// just means "this step's edit panel is open").
+.multiSelected .shapeFill {
+  box-shadow: 0 0 0 3px var(--risk-high), 0 4px 10px rgba(16, 24, 40, 0.22);
+}
+
 // Ordinary process steps = rounded rectangles
 .process .shapeFill {
   border-radius: 8px;

@@ -531,6 +531,23 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     if (step) pushUndo({ type: 'delete', step });
   };
 
+  // Deletes an ad-hoc, ctrl/cmd/shift-click multi-selection of specific
+  // steps (see multiSelectedIds in SwimlaneCanvas.tsx) - added 2026-09-28
+  // at the user's request ("drop more than one step in a row"). Same
+  // "local removal already happened, undo re-creates via addProcessStep"
+  // pattern as handleBulkDelete/handleDeleteSectionConfirm, just for an
+  // arbitrary set of ids instead of a whole flow/section.
+  const handleDeleteSteps = (stepIds: string[]): void => {
+    if (activeLock) return; // defense in depth - SwimlaneCanvas's isLocked prop already hides the delete affordance
+    const deleted = steps.filter(s => stepIds.includes(s.id));
+    if (deleted.length === 0) return;
+    setSteps(prev => prev.filter(s => !stepIds.includes(s.id)));
+    stepIds.forEach(id => {
+      dataService.deleteProcessStep(id).catch((err: Error) => setError(err.message));
+    });
+    pushUndo({ type: 'bulkDelete', steps: deleted });
+  };
+
   // Deletes every step currently visible - the whole selected Process Step
   // ID group's flow, or the whole Process ID if "All" is selected (see
   // visibleSteps) - so removing a whole mistaken flow doesn't mean
@@ -1713,6 +1730,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   onLabelEdge={handleLabelEdge}
                   onEditStep={handleEditStep}
                   onDeleteStep={handleDeleteStep}
+                  onDeleteSteps={handleDeleteSteps}
                   onMoveStep={handleEditStep}
                   onCreateStep={handleCreateStepFromShape}
                   onCreateBranchStep={handleCreateBranchStep}
