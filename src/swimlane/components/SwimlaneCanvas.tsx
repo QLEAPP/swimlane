@@ -94,6 +94,12 @@ interface IEdgeGeometry {
   path: string;
   labelX: number;
   labelY: number;
+  // 'direct' edges have no draggable bend to redirect (see the drag
+  // handle rendered below, added 2026-09-28 at the user's request -
+  // "when they go up and I want them to be within the document, by
+  // dragging them they can redirect") - only localHop/highway edges
+  // route through an explicit, adjustable Y coordinate at all.
+  draggableY: boolean;
 }
 
 // Real ResponsibleJobTitle values from the source list read as one dense
@@ -455,6 +461,75 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     }
   };
 
+  // Two different dependent steps can produce the exact same literal
+  // DependsOn token text (e.g. both depending on the same decision row
+  // while sharing that decision's own processStepId prefix), so the
+  // token alone isn't a safe key for draft input state or React lists -
+  // scope every lookup to toRowId+token instead. Moved up here
+  // (2026-09-28) so the edge-offset dragging below can share it too, not
+  // just the label-editing code further down that originally defined it.
+  const draftKey = (edge: IResolvedEdge): string => `${edge.toRowId}::${edge.token}`;
+
+  // A manually-dragged Y position for a specific edge's highway/local-hop
+  // bend (added 2026-09-28 at the user's request - an arrow routed
+  // through the shared cross-lane strip can end up reading as if it
+  // "goes up and out of the document"; dragging its bend down lets
+  // someone pull it back to somewhere that reads better). Keyed the same
+  // way draftLabels already is (`${toRowId}::${token}`, see draftKey
+  // below) - one entry per edge that's ever been manually adjusted, all
+  // others keep using the automatic track assignment. Same per-viewer,
+  // localStorage-backed, per-Process-ID persistence as customLaneOrder
+  // above, and for the same reason: this is a display preference (where
+  // a line bends), not real process data, and there's no confirmed real
+  // SharePoint column to hold it in.
+  const [edgeYOffsets, setEdgeYOffsets] = React.useState<{ [edgeKey: string]: number }>({});
+  const [draggingEdgeKey, setDraggingEdgeKey] = React.useState<string | undefined>(undefined);
+  const edgeDragStartRef = React.useRef<{ startClientY: number; startOffset: number } | undefined>(undefined);
+
+  React.useEffect(() => {
+    if (!processIdForLanes) { setEdgeYOffsets({}); return; }
+    try {
+      const raw = window.localStorage.getItem(`swimlane-edge-offsets:${processIdForLanes}`);
+      setEdgeYOffsets(raw ? JSON.parse(raw) : {});
+    } catch {
+      setEdgeYOffsets({});
+    }
+  }, [processIdForLanes]);
+
+  const handleEdgeHandlePointerDown = (edge: IResolvedEdge, currentY: number) => (e: React.PointerEvent): void => {
+    if (isLocked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const key = draftKey(edge);
+    edgeDragStartRef.current = { startClientY: e.clientY, startOffset: edgeYOffsets[key] ?? currentY };
+    setDraggingEdgeKey(key);
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+
+  const handleEdgeHandlePointerMove = (e: React.PointerEvent): void => {
+    if (!draggingEdgeKey || !edgeDragStartRef.current) return;
+    const dy = e.clientY - edgeDragStartRef.current.startClientY;
+    const newOffset = edgeDragStartRef.current.startOffset + dy;
+    setEdgeYOffsets(prev => ({ ...prev, [draggingEdgeKey]: newOffset }));
+  };
+
+  const handleEdgeHandlePointerUp = (): void => {
+    if (!draggingEdgeKey) return;
+    setDraggingEdgeKey(undefined);
+    edgeDragStartRef.current = undefined;
+    setEdgeYOffsets(current => {
+      if (processIdForLanes) {
+        try {
+          window.localStorage.setItem(`swimlane-edge-offsets:${processIdForLanes}`, JSON.stringify(current));
+        } catch {
+          // Best-effort only - the drag still applies for the rest of
+          // this session via state, just won't survive a reload.
+        }
+      }
+      return current;
+    });
+  };
+
   // Every visible step gets its own column (timeline slot) instead of
   // being grouped/stacked with every other row that shares its Process
   // Step ID - see utils/columns.ts for why. orderedSteps IS the column
@@ -761,23 +836,28 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       const bOffset = toOffset.get(edge) || 0;
       if (tier === 'direct') {
         const result = connectorPath(a, b, aOffset, bOffset);
-        return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY };
+        return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: false };
       }
+      // A manually-dragged Y (see edgeYOffsets above) always wins over the
+      // automatic track assignment when one's been set for this specific
+      // edge - the whole point is overriding the auto layout, not just
+      // nudging it.
+      const customY = edgeYOffsets[draftKey(edge)];
       if (tier === 'localHop') {
         const track = localHopTracks.get(edge) || 0;
         const laneTop = laneMinTop.get(lane || 'Unassigned');
         const baseTop = laneTop === undefined ? Math.min(a.top, b.top) : laneTop;
-        const hopY = baseTop - LOCAL_HOP_CLEARANCE + LOCAL_HOP_TRACK_Y[track % LOCAL_HOP_TRACK_Y.length];
-        const result = highwayPath(a, b, hopY, aOffset, bOffset);
-        return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY };
+        const autoHopY = baseTop - LOCAL_HOP_CLEARANCE + LOCAL_HOP_TRACK_Y[track % LOCAL_HOP_TRACK_Y.length];
+        const result = highwayPath(a, b, customY ?? autoHopY, aOffset, bOffset);
+        return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
       }
       const track = highwayTracks.get(edge) || 0;
-      const highwayY = highwayBaseY + HIGHWAY_TRACK_Y[track % HIGHWAY_TRACK_Y.length];
-      const result = highwayPath(a, b, highwayY, aOffset, bOffset);
-      return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY };
+      const autoHighwayY = highwayBaseY + HIGHWAY_TRACK_Y[track % HIGHWAY_TRACK_Y.length];
+      const result = highwayPath(a, b, customY ?? autoHighwayY, aOffset, bOffset);
+      return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);
-  }, [visibleEdges, orderedSteps, stepsById, needsHighwayStrip]);
+  }, [visibleEdges, orderedSteps, stepsById, needsHighwayStrip, edgeYOffsets]);
 
   React.useLayoutEffect(() => {
     // Re-runs after needsHighwayStrip flips and the spacer's own height
@@ -831,13 +911,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     onAutoOpenHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenStepId, steps]);
-
-  // Two different dependent steps can produce the exact same literal
-  // DependsOn token text (e.g. both depending on the same decision row
-  // while sharing that decision's own processStepId prefix), so the
-  // token alone isn't a safe key for draft input state or React lists -
-  // scope every lookup to toRowId+token instead.
-  const draftKey = (edge: IResolvedEdge): string => `${edge.toRowId}::${edge.token}`;
 
   const saveLabel = (edge: IResolvedEdge): void => {
     const label = draftLabels[draftKey(edge)];
@@ -961,7 +1034,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
             <path d="M0,0 L9,4.5 L0,9 Z" fill="#1441b9" />
           </marker>
         </defs>
-        {edgeGeometry.map(({ edge, path, labelX, labelY }) => {
+        {edgeGeometry.map(({ edge, path, labelX, labelY, draggableY }) => {
           const highlighted = selectedNodeId !== undefined && edge.fromRowId === selectedNodeId;
           return (
             <g key={`${edge.fromRowId}-${edge.toRowId}-${edge.token}`}>
@@ -999,6 +1072,31 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               />
               {edge.label && (
                 <text x={labelX} y={labelY - 4} textAnchor="middle" className={styles.edgeLabel}>{edge.label}</text>
+              )}
+              {/*
+                Lets this specific edge's bend be pulled up/down by hand
+                (added 2026-09-28 at the user's request - "when they go
+                up and I want them to be within the document, by dragging
+                them they can redirect") - only shown for edges that
+                actually route through an explicit, adjustable Y (see
+                draggableY on IEdgeGeometry); a 'direct' edge's bend isn't
+                a simple Y coordinate the same way. Plain pointer events,
+                not HTML5 drag-and-drop - this needs live position
+                feedback while dragging, which mousemove gives and DnD's
+                own drag image doesn't.
+              */}
+              {draggableY && !isLocked && (
+                <circle
+                  className={styles.edgeDragHandle}
+                  cx={labelX}
+                  cy={labelY}
+                  r={6}
+                  onPointerDown={handleEdgeHandlePointerDown(edge, labelY)}
+                  onPointerMove={handleEdgeHandlePointerMove}
+                  onPointerUp={handleEdgeHandlePointerUp}
+                >
+                  <title>Drag to redirect this arrow</title>
+                </circle>
               )}
             </g>
           );

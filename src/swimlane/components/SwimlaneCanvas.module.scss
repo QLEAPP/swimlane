@@ -71,6 +71,27 @@
   fill: var(--navy);
 }
 
+// Lets a localHop/highway edge's own bend be pulled up/down by hand (see
+// draggableY on IEdgeGeometry) - re-enables pointer events the same way
+// .edgeHitArea does (.edgeOverlay itself stays pointer-events:none so
+// empty canvas space still click-through). Faint by default, same
+// "discoverable but not cluttering a dense diagram" reasoning as
+// .connectorHandle on ShapeNode - brightens on hover so it reads as
+// "grab this" once someone's pointer is actually near it.
+.edgeDragHandle {
+  pointer-events: all;
+  cursor: ns-resize;
+  fill: var(--surface);
+  stroke: var(--blue);
+  stroke-width: 1.5px;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
 .grid {
   display: grid;
   border-collapse: collapse;
