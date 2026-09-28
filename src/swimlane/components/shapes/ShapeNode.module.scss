@@ -15,11 +15,15 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 8px 12px;
+  // Bumped a little (was 8px 12px / 120-190px) at the user's request -
+  // real action descriptions were running close to the edges, especially
+  // on Decision/Approval where the clipped shape eats further into the
+  // available space than a plain rectangle does.
+  padding: 10px 14px;
   color: #fff;
   font-weight: 600;
-  min-width: 120px;
-  max-width: 190px;
+  min-width: 135px;
+  max-width: 210px;
   transition: filter 0.15s ease, transform 0.15s ease;
 
   &:hover {
@@ -75,10 +79,17 @@
 // connectors land precisely on the tip instead of approximating it
 // against a rotated bounding box.
 .decision {
-  width: 170px;
-  height: 130px;
-  min-width: 170px;
-  max-width: 170px;
+  // Bumped noticeably more than the other shapes (was 170x130 / label
+  // 100px, then 190x145 / 115px) - confirmed at the user's request
+  // ("SPECIALLY THE TRIANGLE") that the diamond specifically still read
+  // as too cramped. A diamond's usable text area is a lot smaller than
+  // its own bounding box (the clip-path cuts well inside all four
+  // corners, unlike a plain rectangle), so it needs a bigger size jump
+  // than Process/Approval to fit the same amount of text comfortably.
+  width: 215px;
+  height: 165px;
+  min-width: 215px;
+  max-width: 215px;
 
   .shapeFill {
     clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
@@ -86,17 +97,20 @@
   }
 
   .label {
-    max-width: 100px;
+    max-width: 135px;
     display: inline-block;
   }
 }
 
 // Approval-type = circles
 .approval {
-  width: 140px;
-  height: 140px;
-  min-width: 140px;
-  max-width: 140px;
+  // Bumped a little (was 140x140) at the user's request - same reasoning
+  // as .decision above, a circle's usable text area is smaller than its
+  // bounding box too.
+  width: 155px;
+  height: 155px;
+  min-width: 155px;
+  max-width: 155px;
 
   .shapeFill {
     border-radius: 50%;

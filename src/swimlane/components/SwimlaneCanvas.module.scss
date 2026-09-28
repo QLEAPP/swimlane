@@ -87,9 +87,11 @@
   // of the canvas - that's what was producing 3-4 unrelated connections
   // all detouring through the same shared strip and reading as one
   // tangled knot. 44px comfortably fits the hop's ~22px clearance above
-  // the row plus a couple of parallel tracks, even against the tightest
-  // shape (the 140px approval circle leaves ~25px of its own cell
-  // above/below it).
+  // the row plus a couple of parallel tracks, even against the tallest
+  // shape (the 165px Decision diamond - bumped 2026-09-28 at the user's
+  // request from 130px, now taller than the 155px Approval circle) -
+  // .laneCell's own min-height just grows a little past 190px to fit it
+  // rather than clipping anything, since it's a floor, not a cap.
   row-gap: 44px;
 }
 
@@ -214,9 +216,12 @@
   justify-content: center;
   // Each cell now holds at most one shape (every step gets its own
   // column, so there's no more stacking within a cell) - the generous
-  // min-height still comfortably clears the tallest shape (the 140px
-  // approval circle) with room to spare for the local-hop clearance
-  // above/below it (see LOCAL_HOP_CLEARANCE in SwimlaneCanvas.tsx).
+  // min-height comfortably clears the tallest shape (the 165px Decision
+  // diamond, as of 2026-09-28 - see ShapeNode.module.scss) with room to
+  // spare for the local-hop clearance above/below it (see
+  // LOCAL_HOP_CLEARANCE in SwimlaneCanvas.tsx). Just a floor, not a cap -
+  // the cell grows past this to fit a shape taller than 190px minus its
+  // own padding, never clips one.
   min-height: 190px;
   background: var(--canvas);
   transition: background-color 0.1s ease, border-color 0.1s ease;
