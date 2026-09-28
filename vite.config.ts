@@ -9,4 +9,14 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: process.env.BASE_PATH || '/',
   plugins: [react()],
+  // Explicit host (added 2026-09-28 - real report of "localhost fails to
+  // load") - Vite's own default loopback-only bind can end up listening on
+  // just one of IPv4 (127.0.0.1) / IPv6 (::1) depending on the machine's
+  // network config, while a browser trying the other one hangs/fails to
+  // connect even though the dev server itself is running fine (confirmed:
+  // curl/Invoke-WebRequest reached it, a browser didn't). Binding to every
+  // interface removes that ambiguity entirely.
+  server: {
+    host: true,
+  },
 })
