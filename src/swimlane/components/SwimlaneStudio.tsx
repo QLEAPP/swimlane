@@ -15,7 +15,7 @@ import { IProcessIdLabel } from '../models/IProcessIdLabel';
 import { IProcessIdLock, findActiveLock } from '../models/IProcessIdLock';
 import { ISwimlaneComment } from '../models/ISwimlaneComment';
 import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
-import { resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions } from '../utils/dependencyResolution';
+import { resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
 import { computeInsertOrderBefore } from '../utils/columns';
 import { buildExportCsv, downloadTextFile } from '../utils/csvExport';
 import { ADMIN_UNLOCK_PASSWORD } from '../adminConfig';
@@ -101,6 +101,7 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
   shapeOverride: '',
   responsibleJobTitle: '',
   dependsOnStepIds: [],
+  edgeLabelsByDependsOnId: {},
   linkedRisks: [],
   sopLink: '',
   delegationOfAuthorityLink: '',
@@ -968,7 +969,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     // onto a brand-new UK step would mislabel it.
     const regionReferenceStep = stepsInRegion[0];
     const anyReferenceStep = stepsInProcessId[0];
-    const { dependsOnStepIds, ...fields } = newStepDraft;
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = newStepDraft;
     setSaving(true);
     dataService.addProcessStep({
       apqcTitle: regionReferenceStep
@@ -987,7 +988,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       region: selectedFlowRegion || '',
       ...fields,
       actionDescription: fields.actionDescription.trim(),
-      dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds)
+      dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds),
+      edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId)
     })
       .then(created => {
         setSteps(prev => [...prev, created]);
@@ -1660,6 +1662,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                         onChange={setNewStepDraft}
                         employees={employees}
                         dependsOnOptions={addStepDependsOnOptions}
+                        dependsOnSteps={stepsInRegion}
                         riskStatements={riskStatements}
                         controlStatements={controlStatements}
                         processStepId={drilledDownStepId || selectedProcessId || ''}

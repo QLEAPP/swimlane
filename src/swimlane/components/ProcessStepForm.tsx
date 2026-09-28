@@ -3,6 +3,7 @@ import { TextField, Dropdown, IDropdownOption, ComboBox, IComboBoxOption, Checkb
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, IRiskLink } from '../models/IRiskStatement';
 import { IControlStatement } from '../models/IControlStatement';
+import { IProcessStep, getShapeType } from '../models/IProcessStep';
 import { IDataService } from '../services/IDataService';
 import EmployeePicker from './EmployeePicker';
 import RiskLinkPicker from './RiskLinkPicker';
@@ -20,6 +21,17 @@ export interface IProcessStepFormValue {
   shapeOverride: string;
   responsibleJobTitle: string;
   dependsOnStepIds: string[];
+  // Branch label (e.g. "Yes"/"No") for a picked dependency that's a
+  // Decision, keyed by that dependency's step id - added 2026-09-28 at
+  // the user's request ("simpler to navigate" than the old flow: create
+  // both branch steps, THEN go find the connecting arrow on the canvas or
+  // dig through Outgoing connections to label it). Only ever meaningful
+  // for ids that are ALSO in dependsOnStepIds and resolve to a Decision
+  // step - see the "Depends on" section below. Converted to the real,
+  // token-keyed edgeLabels the data model actually uses (see
+  // IProcessStep.edgeLabels) at save time, since a token isn't known
+  // until the dependency is resolved against the full step list.
+  edgeLabelsByDependsOnId: { [stepId: string]: string };
   linkedRisks: IRiskLink[];
   sopLink: string;
   delegationOfAuthorityLink: string;
@@ -53,6 +65,10 @@ export interface IProcessStepFormProps {
   onChange: (value: IProcessStepFormValue) => void;
   employees: IEmployee[];
   dependsOnOptions: IDropdownOption[];
+  // The real steps dependsOnOptions was built from - used only to look up
+  // a picked dependency's actual shape (is it a Decision?) and its own
+  // action description, for the inline branch-label fields below.
+  dependsOnSteps: IProcessStep[];
   riskStatements: IRiskStatement[];
   controlStatements: IControlStatement[];
   // The step's own Process Step ID - see ControlLinkPicker for why
@@ -72,12 +88,22 @@ export interface IProcessStepFormProps {
 }
 
 const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
-  value, onChange, employees, dependsOnOptions, riskStatements, controlStatements, processStepId, processDescription,
+  value, onChange, employees, dependsOnOptions, dependsOnSteps, riskStatements, controlStatements, processStepId, processDescription,
   dataService, onControlLinked, onControlCreated, onRiskCreated
 }) => {
   const set = <K extends keyof IProcessStepFormValue>(key: K, v: IProcessStepFormValue[K]): void => {
     onChange({ ...value, [key]: v });
   };
+
+  const dependsOnStepsById = React.useMemo(() => new Map(dependsOnSteps.map(s => [s.id, s])), [dependsOnSteps]);
+  // Only Decision dependencies need a branch label - confirmed design rule
+  // (see findUnlabeledDecisionEdges) is every OUTGOING edge from a
+  // Decision needs one, which is exactly "this new/edited step depends on
+  // a Decision" from here.
+  const decisionDependencyIds = value.dependsOnStepIds.filter(id => {
+    const step = dependsOnStepsById.get(id);
+    return !!step && getShapeType(step) === 'decision';
+  });
 
   return (
     <>
@@ -143,6 +169,18 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
           set('dependsOnStepIds', ids);
         }}
       />
+      {decisionDependencyIds.map(stepId => {
+        const decisionStep = dependsOnStepsById.get(stepId);
+        return (
+          <TextField
+            key={stepId}
+            label={`Branch label for "${decisionStep?.actionDescription || stepId}" (e.g. Yes/No)`}
+            placeholder="Yes / No / label this branch"
+            value={value.edgeLabelsByDependsOnId[stepId] || ''}
+            onChange={(_e, v) => set('edgeLabelsByDependsOnId', { ...value.edgeLabelsByDependsOnId, [stepId]: v || '' })}
+          />
+        );
+      })}
       <RiskLinkPicker
         riskStatements={riskStatements}
         value={value.linkedRisks}

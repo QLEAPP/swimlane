@@ -8,7 +8,7 @@ import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { IDataService } from '../services/IDataService';
 import { getCategoryId, getProcessGroupId, getCategoryName, getProcessGroupName } from '../utils/apqcHierarchy';
 import { getProcessId } from '../models/IProcessStep';
-import { stepIdsToDependsOnTokens, buildDependsOnOptions } from '../utils/dependencyResolution';
+import { stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
 import ProcessStepForm, { IProcessStepFormValue } from './ProcessStepForm';
 import styles from './NewProcessModal.module.scss';
 
@@ -42,6 +42,7 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
   shapeOverride: '',
   responsibleJobTitle: '',
   dependsOnStepIds: [],
+  edgeLabelsByDependsOnId: {},
   linkedRisks: [],
   sopLink: '',
   delegationOfAuthorityLink: '',
@@ -109,7 +110,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
     if (!canSubmit) return;
     setSaving(true);
     setError(undefined);
-    const { dependsOnStepIds, ...fields } = stepValue;
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = stepValue;
 
     const groupLabelStep = isNewGroup && groupId
       ? dataService.addProcessGroupLabel(groupId, processGroupName.trim()).then(created => { onGroupLabelCreated(created); })
@@ -123,7 +124,8 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         processStepName: processStepName.trim(),
         ...fields,
         actionDescription: fields.actionDescription.trim(),
-        dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds)
+        dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds),
+        edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId)
       }))
       .then(created => {
         setSaving(false);
@@ -186,6 +188,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         onChange={setStepValue}
         employees={employees}
         dependsOnOptions={dependsOnOptions}
+        dependsOnSteps={steps}
         riskStatements={riskStatements}
         controlStatements={controlStatements}
         processStepId={trimmedId}

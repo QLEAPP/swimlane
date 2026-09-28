@@ -81,6 +81,38 @@ export function dependsOnTokensToStepIds(allSteps: IProcessStep[], tokens: strin
 }
 
 /**
+ * ProcessStepForm's inline branch-label draft (see
+ * edgeLabelsByDependsOnId there) -> the real, token-keyed edgeLabels
+ * shape IProcessStep actually stores - a token isn't knowable until the
+ * dependency is resolved against the full step list, so this can't
+ * happen until save time. Shared by every place that saves a step
+ * (add-step, edit panel, new-process) so the conversion can't drift
+ * between them.
+ */
+export function buildEdgeLabels(allSteps: IProcessStep[], edgeLabelsByDependsOnId: { [stepId: string]: string }): { [token: string]: string } {
+  const edgeLabels: { [token: string]: string } = {};
+  Object.entries(edgeLabelsByDependsOnId).forEach(([stepId, label]) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const rowNumber = rowNumberForStepId(allSteps, stepId);
+    if (rowNumber !== undefined) edgeLabels[String(rowNumber)] = trimmed;
+  });
+  return edgeLabels;
+}
+
+/** Reverse of buildEdgeLabels - pre-populates the edit panel's draft from a step's existing edgeLabels. */
+export function edgeLabelsToDependsOnDraft(allSteps: IProcessStep[], edgeLabels: { [token: string]: string } | undefined): { [stepId: string]: string } {
+  const draft: { [stepId: string]: string } = {};
+  Object.entries(edgeLabels || {}).forEach(([token, label]) => {
+    const match = /(\d+)\s*$/.exec(token);
+    if (!match) return;
+    const stepId = stepIdForRowNumber(allSteps, parseInt(match[1], 10));
+    if (stepId) draft[stepId] = label;
+  });
+  return draft;
+}
+
+/**
  * Options for a "depends on" picker: every step, labeled by its Process
  * Step ID and a truncated description so two steps with the same wording
  * elsewhere are still distinguishable. Shared by the add-step form and

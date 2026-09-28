@@ -8,7 +8,7 @@ import { IControlStatement } from '../models/IControlStatement';
 import { IEmployee } from '../models/IEmployee';
 import { IDataService } from '../services/IDataService';
 import { SwimlaneStage } from '../models/ISwimlaneStatus';
-import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions } from '../utils/dependencyResolution';
+import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft } from '../utils/dependencyResolution';
 import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder } from '../utils/columns';
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
@@ -743,6 +743,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       shapeOverride: step.shapeOverride || '',
       responsibleJobTitle: step.responsibleJobTitle,
       dependsOnStepIds: dependsOnTokensToStepIds(allSteps, step.dependsOn),
+      edgeLabelsByDependsOnId: edgeLabelsToDependsOnDraft(allSteps, step.edgeLabels),
       linkedRisks: step.linkedRisks || [],
       sopLink: step.sopLink || '',
       delegationOfAuthorityLink: step.delegationOfAuthorityLink || '',
@@ -798,9 +799,10 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const saveEdit = (): void => {
     const original = selectedNodeId ? stepsById.get(selectedNodeId) : undefined;
     if (!original || !editDraft) return;
-    const { dependsOnStepIds, ...fields } = editDraft;
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = editDraft;
     const dependsOn = stepIdsToDependsOnTokens(allSteps, dependsOnStepIds);
-    onEditStep({ ...original, ...fields, dependsOn });
+    const edgeLabels = buildEdgeLabels(allSteps, edgeLabelsByDependsOnId);
+    onEditStep({ ...original, ...fields, dependsOn, edgeLabels });
   };
 
   const closeEditPopup = (): void => {
@@ -1121,6 +1123,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 onChange={setEditDraft}
                 employees={employees}
                 dependsOnOptions={dependsOnOptions}
+                dependsOnSteps={swimlaneSteps}
                 riskStatements={riskStatements}
                 controlStatements={controlStatements}
                 processStepId={(selectedNodeId && stepsById.get(selectedNodeId)?.processStepId) || ''}
