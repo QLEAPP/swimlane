@@ -1041,6 +1041,42 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       .catch((err: Error) => setError(err.message));
   };
 
+  // Lets a Decision's own edit panel set up BOTH its branches in one
+  // place (added 2026-09-28 at the user's request - "if I want to say it
+  // is no now I have to start again... write the next step if it's a yes
+  // or no action") - previously the only way to add a branch was a
+  // separate trip through "Add a step" with "Depends on" pointing back at
+  // this decision, then a SECOND trip back here (or clicking the arrow)
+  // to label it. Same minimal-then-auto-open pattern as
+  // handleCreateStepFromShape above: creates a real, minimal step already
+  // wired with the right dependsOn/edgeLabels, then opens its edit panel
+  // immediately so the real content gets filled in on the spot.
+  const handleCreateBranchStep = (decisionStep: IProcessStep, label: string): void => {
+    if (activeLock) return;
+    const token = stepIdsToDependsOnTokens(steps, [decisionStep.id])[0];
+    if (!token) return; // decisionStep isn't resolvable against the full dataset - shouldn't happen, nothing sensible to link to otherwise
+    dataService.addProcessStep({
+      apqcTitle: decisionStep.apqcTitle,
+      processDescription: decisionStep.processDescription,
+      processStepId: decisionStep.processStepId,
+      processStepName: decisionStep.processStepName,
+      region: decisionStep.region || '',
+      action: '',
+      actionType: '',
+      actionDescription: 'New step - click to edit',
+      shapeOverride: '',
+      responsibleJobTitle: '',
+      dependsOn: [token],
+      edgeLabels: { [token]: label },
+      linkedRisks: []
+    })
+      .then(created => {
+        setSteps(prev => [...prev, created]);
+        setAutoOpenStepId(created.id);
+      })
+      .catch((err: Error) => setError(err.message));
+  };
+
   if (loading) {
     // Keeps the real header (logo, title) visible instead of a bare
     // Spinner with no layout at all - on the real Graph data path this can
@@ -1639,6 +1675,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   onDeleteStep={handleDeleteStep}
                   onMoveStep={handleEditStep}
                   onCreateStep={handleCreateStepFromShape}
+                  onCreateBranchStep={handleCreateBranchStep}
                   autoOpenStepId={autoOpenStepId}
                   onAutoOpenHandled={() => setAutoOpenStepId(undefined)}
                   swimlaneStage={currentStage}

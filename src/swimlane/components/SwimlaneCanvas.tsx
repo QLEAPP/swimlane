@@ -64,6 +64,13 @@ export interface ISwimlaneCanvasProps {
   // filled in via the edit panel that opens automatically right after
   // (see autoOpenStepId).
   onCreateStep: (shapeOverride: string, lane: string, columnStep: IProcessStep) => void;
+  // Creates a new step already wired as one of a Decision's own branches
+  // (dependsOn + edgeLabels set to `label`, e.g. "Yes"/"No") and opens its
+  // edit panel immediately - added 2026-09-28 at the user's request, so
+  // both branches can be set up from the decision's OWN edit panel (see
+  // the "Branches" section below) instead of a separate "Add a step" trip
+  // per branch plus a second trip back here to label it.
+  onCreateBranchStep: (decisionStep: IProcessStep, label: string) => void;
   // One-shot signal from the parent: once set, opens this step's edit
   // panel exactly as if it had been clicked, then the parent should clear
   // it back to undefined via onAutoOpenHandled. Used right after
@@ -113,7 +120,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated, onRiskCreated,
-  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, autoOpenStepId, onAutoOpenHandled,
+  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onMoveStep, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
   swimlaneStage, stageSetBy, onToggleStage
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
@@ -1135,6 +1142,43 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               />
               <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked} />
             </div>
+
+            {(() => {
+              const original = selectedNodeId ? stepsById.get(selectedNodeId) : undefined;
+              // Only a Decision has real "branches" in the Yes/No sense -
+              // added 2026-09-28 at the user's request ("write the next
+              // step if it is a yes or no action") so both can be set up
+              // from right here instead of a separate "Add a step" trip
+              // per branch. Canonical Yes/No only - anything ELSE already
+              // linked to this decision (a third custom-labeled branch, or
+              // one not yet labeled at all) still shows further down under
+              // "Outgoing connections" as always.
+              if (!original || getShapeType(original) !== 'decision') return null;
+              return (
+                <>
+                  <h4>Branches</h4>
+                  {['Yes', 'No'].map(label => {
+                    const existing = connectionsForSelectedNode.find(
+                      e => (e.label || '').trim().toLowerCase() === label.toLowerCase()
+                    );
+                    return (
+                      <div className={styles.connectionRow} key={label}>
+                        <span>{label}:</span>
+                        {existing ? (
+                          <span>&rarr; {stepsById.get(existing.toRowId)?.actionDescription}</span>
+                        ) : (
+                          <DefaultButton
+                            text={`+ Add "${label}" step`}
+                            disabled={isLocked}
+                            onClick={() => onCreateBranchStep(original, label)}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
 
             <h4>Outgoing connections</h4>
             {connectionsForSelectedNode.length === 0 && <p>Nothing else currently visible depends on this row.</p>}
