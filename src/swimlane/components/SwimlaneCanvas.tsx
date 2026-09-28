@@ -2,7 +2,7 @@
 import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField } from '@fluentui/react';
 import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { IProcessStep, getShapeType } from '../models/IProcessStep';
+import { IProcessStep, getShapeType, getProcessId } from '../models/IProcessStep';
 import { IRiskStatement, worstLinkedSeverity } from '../models/IRiskStatement';
 import { IControlStatement } from '../models/IControlStatement';
 import { IEmployee } from '../models/IEmployee';
@@ -395,10 +395,65 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     [swimlaneSteps, selectedNodeId]
   );
 
-  const lanes = React.useMemo(
-    () => Array.from(new Set(steps.map(s => s.responsibleJobTitle || 'Unassigned'))),
-    [steps]
-  );
+  // Which Process ID this swimlane is currently showing - used only to
+  // scope the custom lane order below to the right process (see
+  // customLaneOrder). swimlaneSteps (this Process ID's own steps,
+  // unfiltered by region/section - see the prop comment) is preferred
+  // over `steps` since the latter can be empty while drilled into an
+  // empty section.
+  const processIdForLanes = getProcessId((swimlaneSteps[0] || steps[0])?.processStepId || '');
+
+  // A manually-set lane order (added 2026-09-28 at the user's request -
+  // "change the places of where the roles are... take a role up or
+  // down"). Lanes otherwise always fall back to first-appearance order,
+  // which nobody can control - people reasonably expect to be able to put
+  // roles in whatever top-to-bottom order actually reads well for their
+  // process. Kept in localStorage, not written to SharePoint - this is a
+  // per-viewer display preference (which order a diagram READS in), not
+  // real process data, and there's no confirmed real list to hold it in
+  // anyway (see the "never fabricate SharePoint schema" rule).
+  const [customLaneOrder, setCustomLaneOrder] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    if (!processIdForLanes) { setCustomLaneOrder([]); return; }
+    try {
+      const raw = window.localStorage.getItem(`swimlane-lane-order:${processIdForLanes}`);
+      setCustomLaneOrder(raw ? JSON.parse(raw) : []);
+    } catch {
+      setCustomLaneOrder([]);
+    }
+  }, [processIdForLanes]);
+
+  const lanes = React.useMemo(() => {
+    const natural = Array.from(new Set(steps.map(s => s.responsibleJobTitle || 'Unassigned')));
+    if (customLaneOrder.length === 0) return natural;
+    // Stored roles first (in their saved order, skipping any that no
+    // longer appear here), then any role NOT yet in the saved preference
+    // (a brand-new one) appended in its natural order - never silently
+    // drops a real lane just because it wasn't part of an old preference.
+    const naturalSet = new Set(natural);
+    const ordered = customLaneOrder.filter(l => naturalSet.has(l));
+    const remaining = natural.filter(l => !customLaneOrder.includes(l));
+    return [...ordered, ...remaining];
+  }, [steps, customLaneOrder]);
+
+  const moveLane = (lane: string, direction: 'up' | 'down'): void => {
+    const idx = lanes.indexOf(lane);
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+    if (idx === -1 || swapWith < 0 || swapWith >= lanes.length) return;
+    const reordered = [...lanes];
+    [reordered[idx], reordered[swapWith]] = [reordered[swapWith], reordered[idx]];
+    setCustomLaneOrder(reordered);
+    if (processIdForLanes) {
+      try {
+        window.localStorage.setItem(`swimlane-lane-order:${processIdForLanes}`, JSON.stringify(reordered));
+      } catch {
+        // Best-effort only (e.g. private-browsing storage block) - the
+        // reorder still applies for the rest of this session via state,
+        // just won't survive a reload.
+      }
+    }
+  };
 
   // Every visible step gets its own column (timeline slot) instead of
   // being grouped/stacked with every other row that shares its Process
@@ -733,11 +788,19 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // Re-runs after needsHighwayStrip flips and the spacer's own height
     // changes in the DOM, so highway edges (if any) get measured against
     // its real, settled position rather than a stale one from before the
-    // resize.
+    // resize. `lanes` is in this list for the same reason, not because
+    // measureEdges itself reads it - reordering lanes changes which ROW
+    // every node renders in without changing measureEdges' own inputs
+    // (visibleEdges/orderedSteps/stepsById all describe COLUMN order, not
+    // lane row order), so without this the arrow overlay would keep
+    // showing stale paths from before the reorder until some UNRELATED
+    // trigger (a window resize) happened to force a recompute - confirmed
+    // real bug report ("make the arrow make sense and not just display
+    // weirdly") once lane reordering became possible.
     measureEdges();
     window.addEventListener('resize', measureEdges);
     return () => window.removeEventListener('resize', measureEdges);
-  }, [measureEdges, needsHighwayStrip]);
+  }, [measureEdges, needsHighwayStrip, lanes]);
 
   const handleNodeClick = (step: IProcessStep): void => {
     const deselecting = selectedNodeId === step.id;
@@ -1026,13 +1089,35 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
           style={{ gridColumn: '1 / -1' }}
         />
 
-        {lanes.map(lane => {
+        {lanes.map((lane, laneIndex) => {
           const laneLabel = formatLaneLabel(lane);
           return (
           <React.Fragment key={lane}>
             <div className={styles.laneLabel}>
-              <div className={styles.laneLabelPrimary}>{laneLabel.primary}</div>
-              {laneLabel.secondary && <div className={styles.laneLabelSecondary}>{laneLabel.secondary}</div>}
+              <div className={styles.laneLabelText}>
+                <div className={styles.laneLabelPrimary}>{laneLabel.primary}</div>
+                {laneLabel.secondary && <div className={styles.laneLabelSecondary}>{laneLabel.secondary}</div>}
+              </div>
+              {!isLocked && lanes.length > 1 && (
+                <div className={styles.laneReorderButtons}>
+                  <IconButton
+                    iconProps={{ iconName: 'ChevronUp' }}
+                    title="Move this role up"
+                    ariaLabel="Move this role up"
+                    className={styles.laneReorderButton}
+                    disabled={laneIndex === 0}
+                    onClick={() => moveLane(lane, 'up')}
+                  />
+                  <IconButton
+                    iconProps={{ iconName: 'ChevronDown' }}
+                    title="Move this role down"
+                    ariaLabel="Move this role down"
+                    className={styles.laneReorderButton}
+                    disabled={laneIndex === lanes.length - 1}
+                    onClick={() => moveLane(lane, 'down')}
+                  />
+                </div>
+              )}
             </div>
             {orderedSteps.map(step => {
               const belongsToLane = (step.responsibleJobTitle || 'Unassigned') === lane;

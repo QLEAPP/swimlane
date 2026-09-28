@@ -153,6 +153,22 @@
   padding: 12px 14px;
   position: sticky;
   z-index: 2;
+  // Holds the label text plus the up/down reorder buttons (added
+  // 2026-09-28 at the user's request - "take a role up or down") side by
+  // side, rather than the buttons overlapping/competing with the text.
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.laneLabelText {
+  // Lets the text side actually shrink/wrap instead of forcing the
+  // reorder buttons out of the fixed-width lane column - a flex child's
+  // default min-width is auto (= its content's width), which without
+  // this would make long job titles push .laneReorderButtons off screen
+  // rather than wrapping normally.
+  min-width: 0;
 }
 
 // Job title - the primary thing a reader scans this column for, so it
@@ -171,6 +187,30 @@
   font-weight: 500;
   font-size: var(--fs-sm);
   color: var(--text-secondary);
+}
+
+// Stacked vertically, not side by side - a lane column is narrow (170px,
+// already often full of a long job title), so up/down reads more
+// naturally as a small stacked pair than competing for horizontal space.
+.laneReorderButtons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.laneReorderButton {
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+
+  &:hover:not(:disabled) {
+    color: var(--blue);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+  }
 }
 
 .corner {
