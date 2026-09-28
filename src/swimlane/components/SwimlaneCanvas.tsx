@@ -465,21 +465,16 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // Drag-to-connect: unlike isValidDropTarget above, a link can legally
   // cross Process Step ID groups within the same swimlane (DependsOn
   // already allows that - see buildDependsOnOptions), so group membership
-  // isn't the constraint here. What IS still enforced, matching the same
-  // "arrows only move forward" rule the move-drag already follows: the
-  // target has to sit AT OR AFTER the source in the current left-to-right
-  // column order, or the new arrow would point backward. Comparing
-  // positions in orderedSteps (the same array that defines the columns
-  // themselves) makes this correct across group boundaries too, and
-  // rules out circular links as a side effect - a genuine cycle would
-  // need at least one backward edge, which this already rejects.
-  const isValidConnectionTarget = (targetStep: IProcessStep): boolean => {
-    if (isLocked || !connectingFromStepId || connectingFromStepId === targetStep.id) return false;
-    const sourceIdx = orderedSteps.findIndex(s => s.id === connectingFromStepId);
-    const targetIdx = orderedSteps.findIndex(s => s.id === targetStep.id);
-    if (sourceIdx === -1 || targetIdx === -1) return false;
-    return targetIdx > sourceIdx;
-  };
+  // isn't the constraint here. Backward links (target sits BEFORE the
+  // source in column order) are allowed too, not just forward ones -
+  // changed 2026-09-28 at the user's request ("link a step to a step
+  // that is behind... when I am saying [a Decision's answer] is no, we
+  // should be able to link it back to previous steps"), a real, common
+  // shape for a rework/retry loop ("if rejected, go back to review").
+  // The only real constraints left are the obvious ones: something's
+  // actually being dragged, and it isn't being dropped on itself.
+  const isValidConnectionTarget = (targetStep: IProcessStep): boolean =>
+    !isLocked && !!connectingFromStepId && connectingFromStepId !== targetStep.id;
 
   const handleConnectDragStart = (step: IProcessStep) => (): void => {
     setConnectingFromStepId(step.id);
