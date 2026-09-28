@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { ComboBox, IComboBoxOption } from '@fluentui/react';
-import { IEmployee } from '../models/IEmployee';
+import { IEmployee, GUARANTEED_JOB_TITLES } from '../models/IEmployee';
 
 export interface IEmployeePickerProps {
   employees: IEmployee[];
@@ -22,7 +22,7 @@ export interface IEmployeePickerProps {
 // the one order every user can predict without knowing the data.
 const EmployeePicker: React.FC<IEmployeePickerProps> = ({ employees, value, onChange }) => {
   const options: IComboBoxOption[] = React.useMemo(() => {
-    const distinctTitles = Array.from(new Set(employees.map(e => e.jobTitle)));
+    const distinctTitles = Array.from(new Set([...GUARANTEED_JOB_TITLES, ...employees.map(e => e.jobTitle)]));
     return distinctTitles.sort((a, b) => a.localeCompare(b)).map(jobTitle => ({ key: jobTitle, text: jobTitle }));
   }, [employees]);
 
