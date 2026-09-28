@@ -750,14 +750,22 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   };
 
   const trimmedRenameSectionId = renameSectionId.trim();
+  // Not compulsory to change (added 2026-09-28 at the user's request -
+  // "save just by saving section name without saving the section id") -
+  // blank means "leave the ID exactly as it already is", only the name
+  // gets updated (see handleRenameSectionSave). Different from
+  // AddStepSectionModal's own blank-means-auto-assign-the-next-number
+  // (there's no "next number" question here - the section already has a
+  // real ID, blank just means don't touch it).
+  const renameSectionIdBlank = trimmedRenameSectionId.length === 0;
   // Renumbering stays within the same Process ID (first 3 segments locked)
   // - reassigning a section to an entirely different process is enough of
   // a different operation (it'd mean re-deriving apqcTitle/
   // processDescription too) that it's out of scope here; same 4-segment
   // format AddStepSectionModal itself validates against.
-  const renameSectionIdLooksValid = renameSectionTarget
+  const renameSectionIdLooksValid = renameSectionIdBlank || (renameSectionTarget
     ? new RegExp(`^${renameSectionTarget.processStepId.split('.').slice(0, 3).join('\\.')}\\.\\d+$`).test(trimmedRenameSectionId)
-    : false;
+    : false);
   // Sections are per-region, not global (confirmed at the user's request -
   // "they don't sit in their own category, they form part of a specific
   // process for a specific region"): the SAME Process Step ID number can
@@ -775,6 +783,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // happens to share the target number) already using the target ID -
   // blocked rather than silently merging two sections' steps together.
   const renameSectionIdCollides = !!renameSectionTarget
+    && !renameSectionIdBlank
     && trimmedRenameSectionId !== renameSectionTarget.processStepId
     && stepsInSameRegionAs(steps).some(s => s.processStepId === trimmedRenameSectionId);
 
@@ -787,7 +796,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     const trimmedName = renameSectionValue.trim();
     if (!trimmedName || !renameSectionIdLooksValid || renameSectionIdCollides) return;
     const oldId = renameSectionTarget.processStepId;
-    const newId = trimmedRenameSectionId;
+    const newId = renameSectionIdBlank ? oldId : trimmedRenameSectionId;
     const affected = stepsInSameRegionAs(steps.filter(s => s.processStepId === oldId));
     const affectedIds = new Set(affected.map(s => s.id));
     pushUndo({ type: 'bulkEdit', previous: affected });
@@ -1276,7 +1285,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         dialogContentProps={{ type: DialogType.normal, title: `Edit section ${renameSectionTarget?.processStepId || ''}` }}
       >
         <TextField
-          label="Process Step ID"
+          label="Process Step ID (optional - leave blank to keep it unchanged)"
           value={renameSectionId}
           onChange={(_e, v) => setRenameSectionId(v || '')}
           errorMessage={
