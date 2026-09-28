@@ -992,7 +992,22 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       // to have already corrected.
       processDescription: (selectedProcessId && customProcessIdNames[selectedProcessId])
         || regionReferenceStep?.processDescription || anyReferenceStep?.processDescription || '',
-      processStepId: drilledDownStepId || selectedProcessId,
+      // Falls back to an EXISTING section's own ID, not the bare Process
+      // ID, when nothing's drilled into (confirmed real bug, 2026-09-28 -
+      // "everytime i add a step it keeps going back on the left... arrows
+      // are messed up"): a bare 3-segment ID like "9.6.1" sorts BEFORE
+      // every real 4-segment section ("9.6.1.1", "9.6.1.2"...) per
+      // compareProcessStepIds (a missing segment counts as -1), so a step
+      // added while viewing "All" (allowed here whenever this Process ID
+      // doesn't use regions - see addBlockedInAllView) was always landing
+      // at the very front of the whole flow instead of continuing
+      // whichever section it actually belonged with - same reference-step
+      // fallback chain as apqcTitle/processDescription/processStepName
+      // just above, applied to processStepId too now. Only actually
+      // falls through to the bare selectedProcessId for a genuinely
+      // brand-new, currently-empty Process ID, where there's no real
+      // section yet to continue anyway.
+      processStepId: drilledDownStepId || regionReferenceStep?.processStepId || anyReferenceStep?.processStepId || selectedProcessId,
       processStepName: regionReferenceStep?.processStepName || anyReferenceStep?.processStepName || '',
       region: selectedFlowRegion || '',
       ...fields,
