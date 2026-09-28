@@ -16,7 +16,7 @@ import { IProcessIdLock, findActiveLock } from '../models/IProcessIdLock';
 import { ISwimlaneComment } from '../models/ISwimlaneComment';
 import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
 import { resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
-import { computeInsertOrderBefore } from '../utils/columns';
+import { computeInsertOrderBefore, compareProcessStepIds } from '../utils/columns';
 import { buildExportCsv, downloadTextFile } from '../utils/csvExport';
 import { ADMIN_UNLOCK_PASSWORD } from '../adminConfig';
 import {
@@ -976,6 +976,22 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     // onto a brand-new UK step would mislabel it.
     const regionReferenceStep = stepsInRegion[0];
     const anyReferenceStep = stepsInProcessId[0];
+    // Continues the LAST existing section (highest Process Step ID), not
+    // necessarily the first one - added 2026-09-28 at the user's request
+    // ("every time a new step is added it should go on the back... at
+    // the end"). Only used for the new step's OWN processStepId below -
+    // apqcTitle/processDescription/processStepName above still use
+    // regionReferenceStep/anyReferenceStep (the FIRST step), since those
+    // describe the process as a whole and are the same regardless of
+    // which section happens to be referenced. Prefers a section within
+    // the CURRENT region over the process-wide latest, matching the same
+    // region-scoping every other section operation already follows.
+    const latestSectionIn = (list: IProcessStep[]): IProcessStep | undefined =>
+      list.reduce<IProcessStep | undefined>(
+        (latest, s) => (!latest || compareProcessStepIds(s.processStepId, latest.processStepId) > 0 ? s : latest),
+        undefined
+      );
+    const lastSectionReferenceStep = latestSectionIn(stepsInRegion) || latestSectionIn(stepsInProcessId);
     const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = newStepDraft;
     setSaving(true);
     dataService.addProcessStep({
@@ -990,23 +1006,25 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       // to have already corrected.
       processDescription: (selectedProcessId && customProcessIdNames[selectedProcessId])
         || regionReferenceStep?.processDescription || anyReferenceStep?.processDescription || '',
-      // Falls back to an EXISTING section's own ID, not the bare Process
-      // ID, when nothing's drilled into (confirmed real bug, 2026-09-28 -
+      // Falls back to the LAST existing section's own ID (see
+      // lastSectionReferenceStep above), not the bare Process ID, when
+      // nothing's drilled into (confirmed real bug, 2026-09-28 -
       // "everytime i add a step it keeps going back on the left... arrows
       // are messed up"): a bare 3-segment ID like "9.6.1" sorts BEFORE
       // every real 4-segment section ("9.6.1.1", "9.6.1.2"...) per
       // compareProcessStepIds (a missing segment counts as -1), so a step
-      // added while viewing "All" (allowed here whenever this Process ID
-      // doesn't use regions - see addBlockedInAllView) was always landing
-      // at the very front of the whole flow instead of continuing
-      // whichever section it actually belonged with - same reference-step
-      // fallback chain as apqcTitle/processDescription/processStepName
-      // just above, applied to processStepId too now. Only actually
-      // falls through to the bare selectedProcessId for a genuinely
-      // brand-new, currently-empty Process ID, where there's no real
-      // section yet to continue anyway.
-      processStepId: drilledDownStepId || regionReferenceStep?.processStepId || anyReferenceStep?.processStepId || selectedProcessId,
-      processStepName: regionReferenceStep?.processStepName || anyReferenceStep?.processStepName || '',
+      // added while viewing "All" was always landing at the very front of
+      // the whole flow instead of continuing whichever section it
+      // actually belonged with. Only actually falls through to the bare
+      // selectedProcessId for a genuinely brand-new, currently-empty
+      // Process ID, where there's no real section yet to continue anyway.
+      processStepId: drilledDownStepId || lastSectionReferenceStep?.processStepId || selectedProcessId,
+      // Must match whichever section processStepId above actually landed
+      // in - using regionReferenceStep/anyReferenceStep's name here
+      // instead (a DIFFERENT, earlier section) would mislabel the new
+      // step with the wrong section's name entirely.
+      processStepName: (drilledDownStepId ? undefined : lastSectionReferenceStep?.processStepName)
+        ?? regionReferenceStep?.processStepName ?? anyReferenceStep?.processStepName ?? '',
       region: selectedFlowRegion || '',
       ...fields,
       actionDescription: fields.actionDescription.trim(),
