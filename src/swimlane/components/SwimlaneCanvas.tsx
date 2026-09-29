@@ -1093,6 +1093,20 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         />
       </div>
       <div className={styles.canvas} ref={canvasRef} onDragOver={handleCanvasDragOver}>
+      {/*
+        Real user report: the exported PDF had no indication anywhere of
+        WHICH process it even was. Only shown during the export capture,
+        not in the live view - the live view already has this Process ID
+        selected/visible elsewhere on screen (breadcrumb, tabs), so this
+        would just be a redundant second heading there, but the PDF is a
+        standalone document once downloaded/printed with none of that
+        surrounding context.
+      */}
+      {exporting && (
+        <h2 className={styles.pdfTitle}>
+          {processIdForLanes}{processDescription ? ` — ${processDescription}` : ''}
+        </h2>
+      )}
       <ShapeLegend
         onDragShapeStart={shapeOverride => !isLocked && setDraggingNewShape(shapeOverride)}
         onDragShapeEnd={() => setDraggingNewShape(undefined)}

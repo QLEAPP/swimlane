@@ -16,6 +16,17 @@
   color: var(--text-secondary);
 }
 
+// Only ever rendered while exporting=true (see SwimlaneCanvas.tsx) - a
+// real DOM element, not an overlay, so it simply adds its own height to
+// canvas.scrollHeight the same way any other child would, no special
+// capture-size handling needed.
+.pdfTitle {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .canvas {
   position: relative;
   overflow: auto;
