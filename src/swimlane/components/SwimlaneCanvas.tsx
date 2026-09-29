@@ -698,6 +698,25 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       });
     };
 
+    // A manually-dragged Y (see edgeYOffsets) is a frozen absolute pixel
+    // position - unlike the automatic hop/highway Y above, it never gets
+    // recomputed against the CURRENT layout. Real user report: an arrow
+    // dragged to a Y that cleared everything fine at the time started
+    // cutting through a box after "changing the position of the roles"
+    // (reordering lanes, or reassigning a step to a different one) moved
+    // that box into the space the stored Y used to pass safely over/under.
+    // Only the horizontal run needs checking - the up/down ticks on either
+    // end stay within their own step's column, which (like the 'direct'
+    // tier) is always empty apart from that one step.
+    const customYIsSafe = (id1: string, id2: string, x1: number, x2: number, y: number): boolean => {
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      return !allRects.some(([id, rect]) => {
+        if (id === id1 || id === id2) return false;
+        return rect.left < right && rect.right > left && rect.top < y && rect.bottom > y;
+      });
+    };
+
     // Three routing tiers, cheapest first:
     //  - direct: nothing between the two boxes, draw straight/dogleg.
     //  - localHop: blocked, but only by a SIBLING IN THE SAME LANE (same
@@ -852,22 +871,28 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         const result = connectorPath(a, b, aOffset, bOffset);
         return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: false };
       }
-      // A manually-dragged Y (see edgeYOffsets above) always wins over the
+      // A manually-dragged Y (see edgeYOffsets above) wins over the
       // automatic track assignment when one's been set for this specific
-      // edge - the whole point is overriding the auto layout, not just
-      // nudging it.
+      // edge AND it's still safe against the CURRENT layout - the whole
+      // point is overriding the auto layout, not just nudging it, but a
+      // frozen pixel value from before a lane reorder/reassignment is only
+      // trustworthy as long as nothing has since moved into its way (see
+      // customYIsSafe above).
       const customY = edgeYOffsets[draftKey(edge)];
+      const x1 = a.cx + aOffset;
+      const x2 = b.cx + bOffset;
+      const customYUsable = customY !== undefined && customYIsSafe(edge.fromRowId, edge.toRowId, x1, x2, customY);
       if (tier === 'localHop') {
         const track = localHopTracks.get(edge) || 0;
         const laneTop = laneMinTop.get(lane || 'Unassigned');
         const baseTop = laneTop === undefined ? Math.min(a.top, b.top) : laneTop;
         const autoHopY = baseTop - LOCAL_HOP_CLEARANCE + LOCAL_HOP_TRACK_Y[track % LOCAL_HOP_TRACK_Y.length];
-        const result = highwayPath(a, b, customY ?? autoHopY, aOffset, bOffset);
+        const result = highwayPath(a, b, customYUsable ? customY : autoHopY, aOffset, bOffset);
         return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
       }
       const track = highwayTracks.get(edge) || 0;
       const autoHighwayY = highwayBaseY + HIGHWAY_TRACK_Y[track % HIGHWAY_TRACK_Y.length];
-      const result = highwayPath(a, b, customY ?? autoHighwayY, aOffset, bOffset);
+      const result = highwayPath(a, b, customYUsable ? customY : autoHighwayY, aOffset, bOffset);
       return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);
