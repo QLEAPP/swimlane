@@ -1285,7 +1285,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 <div className={styles.laneLabelPrimary}>{laneLabel.primary}</div>
                 {laneLabel.secondary && <div className={styles.laneLabelSecondary}>{laneLabel.secondary}</div>}
               </div>
-              {!isLocked && lanes.length > 1 && (
+              {/*
+                Editing UI, not diagram content - hidden during PDF export
+                the same way the connector handle, empty-cell chrome, and
+                the arrow-drag handle are (see exporting elsewhere in this
+                file). Real user report: "the arrows on the role shouldn't
+                appear in the pdf document" - these up/down chevrons were
+                missed when the export-hiding pattern was first applied.
+              */}
+              {!isLocked && !exporting && lanes.length > 1 && (
                 <div className={styles.laneReorderButtons}>
                   <IconButton
                     iconProps={{ iconName: 'ChevronUp' }}
