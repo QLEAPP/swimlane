@@ -118,6 +118,19 @@ export class GraphDataService implements IDataService {
   private _listIdCache = new Map<string, string>();
   private _fieldMapCache = new Map<string, FieldMap>();
 
+  // Real, confirmed slow "Add a step" bug: addProcessStep used to
+  // re-fetch and re-parse the WHOLE (paginated) Process list from Graph
+  // on every single call, purely to compute the next Unique ID - the
+  // exact same "redundant full-list Graph round trip on every call" shape
+  // as the _resolveAllLists fix above, just for the process list instead
+  // of the site's list collection. Populated by getProcessSteps() and
+  // appended to by addProcessStep/addProcessSteps - NOT kept in sync by
+  // updateProcessStep/deleteProcessStep, since nextUniqueId only cares
+  // about which IDs are already taken, and a step disappearing or
+  // changing never frees its old ID up for reuse. Don't read this for
+  // anything else without adding that sync.
+  private _cachedProcessSteps: IProcessStep[] | undefined;
+
   // Only used for the same-session OPTIMISTIC stamp on newly-created steps
   // (see addProcessStep) - never written to SharePoint as a real column,
   // since createdBy/lastModifiedBy above are already accurate, system-
@@ -256,7 +269,7 @@ export class GraphDataService implements IDataService {
 
     const get = (item: GraphItem, displayName: string): string => GraphDataService._get(item, fieldMap, displayName);
 
-    return items.map((item): IProcessStep => ({
+    const result = items.map((item): IProcessStep => ({
       id: item.id,
       apqcTitle: get(item, 'APQC Title'),
       processDescription: get(item, 'Process Description'),
@@ -316,6 +329,8 @@ export class GraphDataService implements IDataService {
       modifiedBy: GraphDataService._identityName(item.lastModifiedBy),
       modifiedAt: item.lastModifiedDateTime
     }));
+    this._cachedProcessSteps = result;
+    return result;
   }
 
   public async getEmployees(): Promise<IEmployee[]> {
@@ -794,8 +809,14 @@ export class GraphDataService implements IDataService {
   }
 
   public async addProcessStep(step: Omit<IProcessStep, 'id'>): Promise<IProcessStep> {
-    const uniqueId = nextUniqueId(await this.getProcessSteps());
-    return this._createProcessStep(step, uniqueId);
+    // Reuses the cache getProcessSteps() already populated (loadAll()
+    // fetches it once up front, well before anyone can click "Add step")
+    // instead of re-fetching and re-parsing the whole paginated Process
+    // list from Graph again just for this - see _cachedProcessSteps.
+    const uniqueId = nextUniqueId(this._cachedProcessSteps ?? await this.getProcessSteps());
+    const createdStep = await this._createProcessStep(step, uniqueId);
+    this._cachedProcessSteps?.push(createdStep);
+    return createdStep;
   }
 
   public async addProcessSteps(steps: Array<Omit<IProcessStep, 'id'>>): Promise<IBulkAddStepsResult> {
@@ -817,7 +838,8 @@ export class GraphDataService implements IDataService {
     // uniqueId is computed once here (not per-row via addProcessStep) so a
     // large import doesn't re-fetch every existing row before each one it
     // creates - each new row's number just increments locally from there.
-    let nextId = parseInt(nextUniqueId(await this.getProcessSteps()), 10);
+    // Same cache reuse as addProcessStep above - see _cachedProcessSteps.
+    let nextId = parseInt(nextUniqueId(this._cachedProcessSteps ?? await this.getProcessSteps()), 10);
     const created: IProcessStep[] = [];
     const failed: Array<{ index: number; error: string }> = [];
     for (let i = 0; i < steps.length; i++) {
@@ -827,6 +849,7 @@ export class GraphDataService implements IDataService {
         failed.push({ index: i, error: err instanceof Error ? err.message : String(err) });
       }
     }
+    this._cachedProcessSteps?.push(...created);
     return { created, failed };
   }
 
@@ -880,6 +903,11 @@ export class GraphDataService implements IDataService {
         [internalName]: String(i + 1).padStart(3, '0')
       });
     }
+    // This renumbers Unique ID on the server directly (not through
+    // getProcessSteps()/addProcessStep), so a cache from an earlier
+    // getProcessSteps() call this session would otherwise keep showing
+    // the pre-backfill numbers - see _cachedProcessSteps.
+    this._cachedProcessSteps = undefined;
     return items.length;
   }
 }
