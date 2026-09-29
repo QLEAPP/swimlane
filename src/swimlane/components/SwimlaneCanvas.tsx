@@ -1133,9 +1133,14 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 a simple Y coordinate the same way. Plain pointer events,
                 not HTML5 drag-and-drop - this needs live position
                 feedback while dragging, which mousemove gives and DnD's
-                own drag image doesn't.
+                own drag image doesn't. Editing UI, not diagram content -
+                hidden during PDF export the same way the connector
+                handle and empty-cell chrome are (see exportToPdf/
+                cellClassName) - a printed diagram showing a circle on
+                every bendable arrow read as visual noise/a rendering
+                artifact, not something meant to be there.
               */}
-              {draggableY && !isLocked && (
+              {draggableY && !isLocked && !exporting && (
                 <circle
                   className={styles.edgeDragHandle}
                   cx={labelX}
