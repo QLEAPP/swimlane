@@ -708,13 +708,20 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // Only the horizontal run needs checking - the up/down ticks on either
     // end stay within their own step's column, which (like the 'direct'
     // tier) is always empty apart from that one step.
-    const customYIsSafe = (id1: string, id2: string, x1: number, x2: number, y: number): boolean => {
+    //
+    // Deliberately checks EVERY box, including the edge's own source/
+    // target (id1/id2) - a second real report: dragging the bend DOWN,
+    // toward or past the row it's meant to route ABOVE, put the horizontal
+    // run at a Y that's inside the source/target's OWN box, which reads as
+    // "the arrow cuts through the box it's leaving/entering" even though
+    // no THIRD box is involved. A safe Y is never inside any box's own
+    // vertical span, its own endpoints included - only touching a box's
+    // top edge exactly (y === rect.top, the natural attach point) is fine,
+    // which the strict `<` below already allows.
+    const customYIsSafe = (x1: number, x2: number, y: number): boolean => {
       const left = Math.min(x1, x2);
       const right = Math.max(x1, x2);
-      return !allRects.some(([id, rect]) => {
-        if (id === id1 || id === id2) return false;
-        return rect.left < right && rect.right > left && rect.top < y && rect.bottom > y;
-      });
+      return !allRects.some(([, rect]) => rect.left < right && rect.right > left && rect.top < y && rect.bottom > y);
     };
 
     // Three routing tiers, cheapest first:
@@ -881,7 +888,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       const customY = edgeYOffsets[draftKey(edge)];
       const x1 = a.cx + aOffset;
       const x2 = b.cx + bOffset;
-      const customYUsable = customY !== undefined && customYIsSafe(edge.fromRowId, edge.toRowId, x1, x2, customY);
+      const customYUsable = customY !== undefined && customYIsSafe(x1, x2, customY);
       if (tier === 'localHop') {
         const track = localHopTracks.get(edge) || 0;
         const laneTop = laneMinTop.get(lane || 'Unassigned');
