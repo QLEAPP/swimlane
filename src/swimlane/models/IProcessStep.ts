@@ -134,16 +134,28 @@ export function getProcessId(processStepId: string): string {
   return (processStepId || '').split('.').slice(0, 3).join('.');
 }
 
-// The regions always offered by FlowRegionTabs even before any step
-// exists for them yet, and also what CSV import (see utils/csvImport.ts)
+// The regions always offered by FlowRegionTabs (once a Process ID uses
+// any at all - see flowRegionOptions below) even before any step exists
+// for one of them yet, and also what CSV import (see utils/csvImport.ts)
 // recognizes when auto-detecting a region from an APQC Title's own
 // trailing "- UK" suffix - shared here, in one place, rather than
 // duplicated. 'Global' added 2026-08-19 for a process that genuinely
 // applies everywhere rather than being tied to one country's variant -
-// a real, taggable region in its own right, distinct from "All" (the
-// FlowRegionTabs aggregate view showing every region's steps together
-// regardless of tag, selectedFlowRegion === undefined).
+// a real, taggable region in its own right.
 export const KNOWN_FLOW_REGIONS = ['UK', 'US', 'SA', 'Global'];
+
+// The ordered list FlowRegionTabs shows for a given Process ID's steps -
+// every known region plus any real, non-standard tag actually found in
+// the data. Shared with SwimlaneStudio (not just computed locally inside
+// FlowRegionTabs) since removing the old combined "All" tab there (real
+// user request - "leave [All] rather to the sections") means
+// SwimlaneStudio itself now has to auto-pick a default region the first
+// time a region-using Process ID is opened, using this exact same order.
+export function flowRegionOptions(steps: Array<{ region?: string }>): string[] {
+  const fromData = Array.from(new Set(steps.map(s => s.region).filter((r): r is string => !!r)));
+  const extras = fromData.filter(r => !KNOWN_FLOW_REGIONS.includes(r)).sort();
+  return [...KNOWN_FLOW_REGIONS, ...extras];
+}
 
 /**
  * Real APQC Title values already carry their region as a trailing suffix

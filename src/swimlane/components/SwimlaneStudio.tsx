@@ -5,7 +5,7 @@ import {
 } from '@fluentui/react';
 import styles from './SwimlaneStudio.module.scss';
 import type { ISwimlaneStudioProps } from './ISwimlaneStudioProps';
-import { IProcessStep, getProcessId } from '../models/IProcessStep';
+import { IProcessStep, getProcessId, flowRegionOptions } from '../models/IProcessStep';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement } from '../models/IRiskStatement';
 import { IControlStatement } from '../models/IControlStatement';
@@ -361,6 +361,33 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     [steps, selectedProcessId]
   );
 
+  // Whether THIS Process ID has ever had a region tag at all - gates
+  // whether FlowRegionTabs renders at all now that its own "All" tab is
+  // gone (real user request - "remove the all part when viewing regional
+  // workflow and leave it rather to the sections"). A Process ID that's
+  // never used regions has no real region to default to, so the tab bar
+  // just doesn't show, same as if regions didn't exist for it.
+  const anyRegionUsed = React.useMemo(() => stepsInProcessId.some(s => !!s.region), [stepsInProcessId]);
+
+  // Keeps selectedFlowRegion always pointing at a REAL region while
+  // anyRegionUsed is true (there's no "All" to fall back to anymore), and
+  // always cleared back to undefined otherwise - re-runs whenever the
+  // Process ID itself changes so a region picked in a PREVIOUS Process ID
+  // never carries over into one that doesn't have it (or doesn't use
+  // regions at all).
+  React.useEffect(() => {
+    if (!selectedProcessId) return;
+    if (anyRegionUsed) {
+      const options = flowRegionOptions(stepsInProcessId);
+      if (!selectedFlowRegion || !options.includes(selectedFlowRegion)) {
+        setSelectedFlowRegion(options[0]);
+      }
+    } else if (selectedFlowRegion !== undefined) {
+      setSelectedFlowRegion(undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProcessId, anyRegionUsed]);
+
   // The readable name for wherever the header breadcrumb is currently
   // pointing - the breadcrumb itself stays the compact numeric trail
   // ("9 / 9.2 / 9.2.3") since that's genuinely useful for quick reference,
@@ -460,17 +487,15 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     [selectedFlowRegion, stepsInRegion, stepsInProcessId]
   );
 
-  // Always blocked from "All" now, not just once regions are already in
-  // use (changed 2026-09-28 at the user's request - "make sure that one
-  // cannot create steps from all directly and only within a region") -
-  // "All" is a combined, read-only view across every region a Process ID
-  // could have, never a swimlane of its own to add directly into, even
-  // for a Process ID that hasn't tagged any region yet. Confirmed at an
-  // earlier real user request that adding directly from "All" was
-  // exactly how steps ended up silently missing a region tag ("created
-  // in All by error") - this closes that gap completely instead of only
-  // once at least one region-tagged step already existed.
-  const addBlockedInAllView = !selectedFlowRegion;
+  // "All" no longer exists as a selectable region view at all (see
+  // anyRegionUsed/FlowRegionTabs above) - selectedFlowRegion only stays
+  // undefined now for a Process ID that's never used regions in the
+  // first place, where there's nothing to block: every one of its steps
+  // is already the whole, single swimlane, not a combined view across
+  // separate ones. Only actually blocks anything in the brief window
+  // right after opening a region-using Process ID, before the effect
+  // above has picked a real region yet.
+  const addBlockedInAllView = anyRegionUsed && !selectedFlowRegion;
 
   // Scoped to the current swimlane (this region's own steps within the
   // Process ID), not the full cross-process-ID dataset - a step
@@ -1691,18 +1716,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                       }}
                     />
                   </div>
-                  <FlowRegionTabs
-                    steps={stepsInProcessId}
-                    selectedRegion={selectedFlowRegion}
-                    onSelect={region => {
-                      // A Process Step ID tab selected in one region may not
-                      // exist (or mean the same thing) in another - clear it
-                      // so switching regions never leaves the canvas
-                      // showing a stale, unrelated tab's worth of nothing.
-                      setSelectedFlowRegion(region);
-                      setDrilledDownStepId(undefined);
-                    }}
-                  />
+                  {anyRegionUsed && (
+                    <FlowRegionTabs
+                      steps={stepsInProcessId}
+                      selectedRegion={selectedFlowRegion}
+                      onSelect={region => {
+                        // A Process Step ID tab selected in one region may not
+                        // exist (or mean the same thing) in another - clear it
+                        // so switching regions never leaves the canvas
+                        // showing a stale, unrelated tab's worth of nothing.
+                        setSelectedFlowRegion(region);
+                        setDrilledDownStepId(undefined);
+                      }}
+                    />
+                  )}
                   <ProcessStepTabs
                     steps={stepsInRegion}
                     selectedStepId={drilledDownStepId}
