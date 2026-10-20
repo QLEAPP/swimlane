@@ -160,6 +160,18 @@ export function computeInsertOrderBefore(allSteps: IProcessStep[], targetStepId:
 }
 
 /**
+ * Counterpart to computeInsertOrderBefore for the canvas's trailing
+ * "Next step" drop column - `targetStepId` is the last step in the flow, so
+ * the new step just sorts one past it within the same group.
+ */
+export function computeInsertOrderAfter(allSteps: IProcessStep[], targetStepId: string): number | undefined {
+  const target = allSteps.find(s => s.id === targetStepId);
+  if (!target) return undefined;
+  const regionSteps = allSteps.filter(s => (s.region || '') === (target.region || ''));
+  return getEffectiveOrder(target, regionSteps) + 1;
+}
+
+/**
  * Whether dropping `draggedStepId` next to `targetStepId` (before or
  * after, per `insertBefore` - i.e. at whatever order computeDropOrder
  * would give it, and whatever section `targetStepId` itself belongs to)

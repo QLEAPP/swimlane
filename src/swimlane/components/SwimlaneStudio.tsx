@@ -16,7 +16,7 @@ import { IProcessIdLock, findActiveLock } from '../models/IProcessIdLock';
 import { ISwimlaneComment } from '../models/ISwimlaneComment';
 import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
 import { resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
-import { computeInsertOrderBefore, compareProcessStepIds } from '../utils/columns';
+import { computeInsertOrderBefore, computeInsertOrderAfter, compareProcessStepIds } from '../utils/columns';
 import { buildExportCsv, downloadTextFile } from '../utils/csvExport';
 import { ADMIN_UNLOCK_PASSWORD } from '../adminConfig';
 import {
@@ -1071,7 +1071,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       ...fields,
       actionDescription: fields.actionDescription.trim(),
       dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds),
-      edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId)
+      edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId, dependsOnStepIds)
     })
       .then(created => {
         setSteps(prev => [...prev, created]);
@@ -1104,8 +1104,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // dropped position, rather than handleAddStep's own reference-step
   // fallback chain (unnecessary here - there's always a real columnStep,
   // that's what was dropped onto).
-  const handleCreateStepFromShape = (shapeOverride: string, lane: string, columnStep: IProcessStep): void => {
+  const handleCreateStepFromShape = (shapeOverride: string, lane: string, columnStep: IProcessStep, position: 'before' | 'after' = 'before'): void => {
     if (activeLock) return;
+    // 'after' = dropped in the trailing "Next step" column, so it follows
+    // on from the flow's last step - wired to depend on it, since that's
+    // what "next step" means (still editable in the panel that opens).
+    const appendAfterToken = position === 'after' ? stepIdsToDependsOnTokens(steps, [columnStep.id])[0] : undefined;
     dataService.addProcessStep({
       apqcTitle: columnStep.apqcTitle,
       processDescription: columnStep.processDescription,
@@ -1117,8 +1121,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       actionDescription: 'New step',
       shapeOverride,
       responsibleJobTitle: lane === 'Unassigned' ? '' : lane,
-      manualOrder: computeInsertOrderBefore(steps, columnStep.id),
-      dependsOn: [],
+      manualOrder: position === 'after' ? computeInsertOrderAfter(steps, columnStep.id) : computeInsertOrderBefore(steps, columnStep.id),
+      dependsOn: appendAfterToken ? [appendAfterToken] : [],
       linkedRisks: []
     })
       .then(created => {

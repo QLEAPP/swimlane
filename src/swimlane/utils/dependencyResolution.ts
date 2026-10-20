@@ -88,12 +88,22 @@ export function dependsOnTokensToStepIds(allSteps: IProcessStep[], tokens: strin
  * happen until save time. Shared by every place that saves a step
  * (add-step, edit panel, new-process) so the conversion can't drift
  * between them.
+ *
+ * Only keeps labels for steps still in `dependsOnStepIds` - confirmed real
+ * bug (2026-10-20): un-picking a dependency left its "Yes"/"No" behind in
+ * the draft and it got saved anyway, so re-linking the same two steps
+ * later brought the old label straight back. Saving through here also
+ * clears any such leftover label already sitting in the data.
  */
-export function buildEdgeLabels(allSteps: IProcessStep[], edgeLabelsByDependsOnId: { [stepId: string]: string }): { [token: string]: string } {
+export function buildEdgeLabels(
+  allSteps: IProcessStep[],
+  edgeLabelsByDependsOnId: { [stepId: string]: string },
+  dependsOnStepIds: string[]
+): { [token: string]: string } {
   const edgeLabels: { [token: string]: string } = {};
   Object.entries(edgeLabelsByDependsOnId).forEach(([stepId, label]) => {
     const trimmed = label.trim();
-    if (!trimmed) return;
+    if (!trimmed || !dependsOnStepIds.includes(stepId)) return;
     const rowNumber = rowNumberForStepId(allSteps, stepId);
     if (rowNumber !== undefined) edgeLabels[String(rowNumber)] = trimmed;
   });

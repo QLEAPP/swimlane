@@ -69,8 +69,10 @@ export interface ISwimlaneCanvasProps {
   // whatever cell it landed on (see computeInsertOrderAfter), shape from
   // which legend swatch was dragged. Everything else starts blank/default,
   // filled in via the edit panel that opens automatically right after
-  // (see autoOpenStepId).
-  onCreateStep: (shapeOverride: string, lane: string, columnStep: IProcessStep) => void;
+  // (see autoOpenStepId). 'after' is only used by the trailing "Next step"
+  // column, where columnStep is the flow's last step and the new one
+  // follows on from it.
+  onCreateStep: (shapeOverride: string, lane: string, columnStep: IProcessStep, position?: 'before' | 'after') => void;
   // Creates a new step already wired as one of a Decision's own branches
   // (dependsOn + edgeLabels set to `label`, e.g. "Yes"/"No") and opens its
   // edit panel immediately - added 2026-09-28 at the user's request, so
@@ -1004,7 +1006,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     if (isLocked) return;
     const target = stepsById.get(edge.toRowId);
     if (!target) return;
-    onEditStep({ ...target, dependsOn: target.dependsOn.filter(token => token !== edge.token) });
+    // Drops the edge's label along with it - leaving it behind meant
+    // re-linking the same two steps later resurrected the old "Yes"/"No"
+    // (confirmed real bug, 2026-10-20).
+    const { [edge.token]: _removedLabel, ...remainingLabels } = target.edgeLabels || {};
+    onEditStep({
+      ...target,
+      dependsOn: target.dependsOn.filter(token => token !== edge.token),
+      edgeLabels: remainingLabels
+    });
   };
 
   const saveEdit = (): void => {
@@ -1012,7 +1022,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     if (!original || !editDraft) return;
     const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = editDraft;
     const dependsOn = stepIdsToDependsOnTokens(allSteps, dependsOnStepIds);
-    const edgeLabels = buildEdgeLabels(allSteps, edgeLabelsByDependsOnId);
+    const edgeLabels = buildEdgeLabels(allSteps, edgeLabelsByDependsOnId, dependsOnStepIds);
     onEditStep({ ...original, ...fields, dependsOn, edgeLabels });
   };
 
@@ -1079,6 +1089,14 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   if (steps.length === 0) {
     return <div className={styles.emptyState}>No steps to show yet.</div>;
   }
+
+  // An always-empty trailing column to drop a legend shape into as the
+  // flow's next step (user request, 2026-10-20 - shapes could only be
+  // dropped onto existing columns, which inserts BEFORE that step, so
+  // there was no way to add one at the end). Editing UI only - hidden
+  // while locked and during PDF export, like the other editing chrome.
+  const lastStep = orderedSteps[orderedSteps.length - 1];
+  const showNextColumn = !!lastStep && !isLocked && !exporting;
 
   return (
     <>
@@ -1249,7 +1267,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         content needs, not to fill leftover space - a short flow now just
         leaves empty canvas to the right instead of stretching.
       */}
-      <div className={styles.grid} style={{ gridTemplateColumns: `170px repeat(${orderedSteps.length}, minmax(170px, 260px))` }}>
+      <div className={styles.grid} style={{ gridTemplateColumns: `170px repeat(${orderedSteps.length + (showNextColumn ? 1 : 0)}, minmax(170px, 260px))` }}>
         <div className={styles.corner} />
         {columnGroups.map(group => {
           // Was ID-only whenever viewing "All" (i.e. exactly where a name
@@ -1280,6 +1298,9 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
             </div>
           );
         })}
+        {showNextColumn && (
+          <div className={styles.columnHeader}><span>Next step</span></div>
+        )}
 
         <div
           className={[styles.highwaySpacer, needsHighwayStrip ? '' : styles.highwaySpacerCompact].filter(Boolean).join(' ')}
@@ -1386,6 +1407,30 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 </div>
               );
             })}
+            {showNextColumn && lastStep && (
+              <div
+                className={[
+                  styles.laneCell,
+                  draggingNewShape ? styles.validDropTarget : '',
+                  dragOverCellId === `${lane}-next` ? styles.dragOver : ''
+                ].filter(Boolean).join(' ')}
+                onDragOver={e => {
+                  if (!draggingNewShape) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                  setDragOverCellId(`${lane}-next`);
+                }}
+                onDragLeave={() => setDragOverCellId(prev => (prev === `${lane}-next` ? undefined : prev))}
+                onDrop={e => {
+                  e.preventDefault();
+                  setDragOverCellId(undefined);
+                  const shapeOverride = draggingNewShape;
+                  setDraggingNewShape(undefined);
+                  if (!shapeOverride || isLocked) return;
+                  onCreateStep(shapeOverride, lane, lastStep, 'after');
+                }}
+              />
+            )}
           </React.Fragment>
           );
         })}

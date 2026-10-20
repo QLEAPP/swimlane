@@ -125,7 +125,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         ...fields,
         actionDescription: fields.actionDescription.trim(),
         dependsOn: stepIdsToDependsOnTokens(steps, dependsOnStepIds),
-        edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId)
+        edgeLabels: buildEdgeLabels(steps, edgeLabelsByDependsOnId, dependsOnStepIds)
       }))
       .then(created => {
         setSaving(false);
