@@ -1003,7 +1003,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const newProcessPrefix = selectedProcessGroupId ? `${selectedProcessGroupId}.` : selectedCategoryId ? `${selectedCategoryId}.` : '';
 
   const handleAddStep = (): void => {
-    if (!selectedProcessId || !newStepDraft.actionDescription.trim() || activeLock) return;
+    if (!selectedProcessId || !newStepDraft.actionDescription.trim() || !newStepDraft.shapeOverride || !newStepDraft.responsibleJobTitle.trim() || activeLock) return;
     // The very first step in a brand-new region has no reference step IN
     // THAT REGION to inherit from (stepsInRegion is empty) - it used to
     // fall back straight to blank/bare defaults there, leaving Process
@@ -1797,7 +1797,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                       />
                       <PrimaryButton
                         text={saving ? 'Adding...' : 'Add step'}
-                        disabled={saving || !newStepDraft.actionDescription.trim()}
+                        disabled={saving || !newStepDraft.actionDescription.trim() || !newStepDraft.shapeOverride || !newStepDraft.responsibleJobTitle.trim()}
                         onClick={handleAddStep}
                       />
                     </>

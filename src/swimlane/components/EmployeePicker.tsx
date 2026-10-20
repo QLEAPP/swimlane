@@ -29,6 +29,9 @@ const EmployeePicker: React.FC<IEmployeePickerProps> = ({ employees, value, onCh
   return (
     <ComboBox
       label="Responsible"
+      // Required since 2026-10-20 (user request) - it decides the step's
+      // lane, and a blank one leaves the step with no real lane at all.
+      required
       placeholder="Search job titles..."
       // `text`, not `selectedKey` - a step's real responsibleJobTitle is
       // often a richer 3-part string ("Title / Code - Dept / Region", see

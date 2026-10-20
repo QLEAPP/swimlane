@@ -104,6 +104,8 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
     && processDescription.trim().length > 0
     && processStepName.trim().length > 0
     && stepValue.actionDescription.trim().length > 0
+    && stepValue.shapeOverride.length > 0
+    && stepValue.responsibleJobTitle.trim().length > 0
     && !saving;
 
   const handleCreate = (): void => {

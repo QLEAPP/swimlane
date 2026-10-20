@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { TextField, Dropdown, IDropdownOption, ComboBox, IComboBoxOption, Checkbox } from '@fluentui/react';
+import { TextField, Dropdown, IDropdownOption, ComboBox, IComboBoxOption, Checkbox, DefaultButton } from '@fluentui/react';
 import { IEmployee } from '../models/IEmployee';
 import { IRiskStatement, IRiskLink } from '../models/IRiskStatement';
 import { IControlStatement } from '../models/IControlStatement';
-import { IProcessStep, getShapeType } from '../models/IProcessStep';
+import { IProcessStep, ShapeType, getShapeType } from '../models/IProcessStep';
 import { IDataService } from '../services/IDataService';
 import EmployeePicker from './EmployeePicker';
 import RiskLinkPicker from './RiskLinkPicker';
@@ -38,13 +38,20 @@ export interface IProcessStepFormValue {
   notes: string;
 }
 
+// No blank "(use heuristic)" option any more - Shape became a required
+// field on 2026-10-20 at the user's request, so every step names its own.
 export const SHAPE_OPTIONS: IDropdownOption[] = [
-  { key: '', text: '(use Action Type / wording heuristic)' },
   { key: 'Process Step', text: 'Process (rounded rectangle)' },
   { key: 'Decision', text: 'Decision (diamond)' },
   { key: 'Approval', text: 'Approval (circle)' },
   { key: 'Document', text: 'Document (artifact)' }
 ];
+
+const SHAPE_OVERRIDE_BY_TYPE: Record<ShapeType, string> = {
+  process: 'Process Step', decision: 'Decision', approval: 'Approval', document: 'Document'
+};
+
+export const shapeTypeToOverride = (shapeType: ShapeType): string => SHAPE_OVERRIDE_BY_TYPE[shapeType];
 
 // Both Action and Action Type are free text in the real data (there's no
 // closed, confirmed list of every value a real export might use) - these
@@ -105,35 +112,32 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
     return !!step && getShapeType(step) === 'decision';
   });
 
+  // Split into essentials vs. "More details" at the user's request
+  // (2026-10-20 - "a lot of things to do but I don't think all are
+  // necessary"). Only the fields the diagram itself can't be drawn
+  // without stay up top: the box text, its shape, its lane, and its
+  // arrows (plus branch labels, which only appear when actually needed).
+  // Everything else is supporting or governance detail usually added on a
+  // second pass. Always starts closed, even when those fields hold values
+  // - the user explicitly wanted it "closed until prompted".
+  const [showMore, setShowMore] = React.useState(false);
+
   return (
     <>
       <TextField
         label="Action description"
+        required
         multiline
         value={value.actionDescription}
         onChange={(_e, v) => set('actionDescription', v || '')}
       />
-      <ComboBox
-        label="Action"
-        placeholder="Choose from the list, or type your own..."
-        text={value.action}
-        allowFreeform
-        autoComplete="on"
-        options={ACTION_SUGGESTIONS}
-        onChange={(_e, option, _index, freeformValue) => set('action', option ? String(option.key) : (freeformValue || ''))}
-      />
-      <ComboBox
-        label="Action type"
-        placeholder="Choose from the list, or type your own..."
-        text={value.actionType}
-        allowFreeform
-        autoComplete="on"
-        options={ACTION_TYPE_SUGGESTIONS}
-        onChange={(_e, option, _index, freeformValue) => set('actionType', option ? String(option.key) : (freeformValue || ''))}
-      />
       <Dropdown
         label="Shape"
-        selectedKey={value.shapeOverride}
+        required
+        placeholder="Choose a shape..."
+        // Only a key the picker actually offers - anything else shows as
+        // unchosen (placeholder) rather than silently blank.
+        selectedKey={SHAPE_OPTIONS.some(o => o.key === value.shapeOverride) ? value.shapeOverride : null}
         options={SHAPE_OPTIONS}
         onChange={(_e, option) => option && set('shapeOverride', String(option.key))}
       />
@@ -181,6 +185,35 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
           />
         );
       })}
+      <DefaultButton
+        iconProps={{ iconName: showMore ? 'ChevronUp' : 'ChevronDown' }}
+        text={showMore ? 'Hide more details' : 'More details (optional) - risks, controls, notes, links'}
+        onClick={() => setShowMore(!showMore)}
+        // Deliberately a full-width bordered button, not a quiet link -
+        // the user asked for it to be "very visible" so nobody misses
+        // that the risk/control fields exist behind it.
+        styles={{ root: { width: '100%', margin: '12px 0', height: 40, fontWeight: 600, borderWidth: 2 } }}
+      />
+      {showMore && (
+      <>
+      <ComboBox
+        label="Action"
+        placeholder="Choose from the list, or type your own..."
+        text={value.action}
+        allowFreeform
+        autoComplete="on"
+        options={ACTION_SUGGESTIONS}
+        onChange={(_e, option, _index, freeformValue) => set('action', option ? String(option.key) : (freeformValue || ''))}
+      />
+      <ComboBox
+        label="Action type"
+        placeholder="Choose from the list, or type your own..."
+        text={value.actionType}
+        allowFreeform
+        autoComplete="on"
+        options={ACTION_TYPE_SUGGESTIONS}
+        onChange={(_e, option, _index, freeformValue) => set('actionType', option ? String(option.key) : (freeformValue || ''))}
+      />
       <RiskLinkPicker
         riskStatements={riskStatements}
         value={value.linkedRisks}
@@ -222,6 +255,8 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
         value={value.delegationOfAuthorityLink}
         onChange={v => set('delegationOfAuthorityLink', v)}
       />
+      </>
+      )}
     </>
   );
 };

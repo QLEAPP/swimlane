@@ -30,5 +30,7 @@ export interface IEmployee {
 // Guaranteed to always appear in the Responsible/job-title picker (see
 // EmployeePicker), even before any real Employees row uses them - added
 // 2026-09-28 at the user's request. Same reasoning and pattern as
-// GUARANTEED_FUNCTIONS in models/IRiskStatement.ts.
-export const GUARANTEED_JOB_TITLES = ['Executive Sponsor', 'Business'];
+// GUARANTEED_FUNCTIONS in models/IRiskStatement.ts. 'Vendor' added
+// 2026-10-20 at the user's request - external suppliers own real steps
+// (e.g. submitting an invoice) but never appear in the Employees list.
+export const GUARANTEED_JOB_TITLES = ['Executive Sponsor', 'Business', 'Vendor'];

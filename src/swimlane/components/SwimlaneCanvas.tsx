@@ -13,7 +13,7 @@ import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDe
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
 import ShapeLegend from './ShapeLegend';
-import ProcessStepForm, { IProcessStepFormValue } from './ProcessStepForm';
+import ProcessStepForm, { IProcessStepFormValue, shapeTypeToOverride } from './ProcessStepForm';
 import styles from './SwimlaneCanvas.module.scss';
 
 export interface ISwimlaneCanvasProps {
@@ -954,7 +954,11 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       action: step.action,
       actionDescription: step.actionDescription,
       actionType: step.actionType,
-      shapeOverride: step.shapeOverride || '',
+      // Shape is required since 2026-10-20 (user request), but older steps
+      // may have none, or a raw value the picker doesn't offer (e.g.
+      // "System workflow") - pre-select whatever shape the step already
+      // DRAWS as, so the panel shows the truth and saving doesn't block.
+      shapeOverride: shapeTypeToOverride(getShapeType(step)),
       responsibleJobTitle: step.responsibleJobTitle,
       dependsOnStepIds: dependsOnTokensToStepIds(allSteps, step.dependsOn),
       edgeLabelsByDependsOnId: edgeLabelsToDependsOnDraft(allSteps, step.edgeLabels),
@@ -1414,6 +1418,9 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
 
             <div className={styles.editForm}>
               <ProcessStepForm
+                // Remount per step so "More details" starts closed again for
+                // each step, not left open from the one shown before.
+                key={selectedNodeId}
                 value={editDraft}
                 onChange={setEditDraft}
                 employees={employees}
@@ -1428,7 +1435,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 onControlCreated={onControlCreated}
                 onRiskCreated={onRiskCreated}
               />
-              <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked} />
+              <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked || !editDraft.actionDescription.trim() || !editDraft.shapeOverride || !editDraft.responsibleJobTitle.trim()} />
             </div>
 
             {(() => {
