@@ -9,7 +9,7 @@ import { IDataService } from '../services/IDataService';
 import { getCategoryId, getProcessGroupId, getCategoryName, getProcessGroupName } from '../utils/apqcHierarchy';
 import { getProcessId } from '../models/IProcessStep';
 import { stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
-import ProcessStepForm, { IProcessStepFormValue } from './ProcessStepForm';
+import ProcessStepForm, { IProcessStepFormValue, MissingFieldsNote, missingRequiredFields } from './ProcessStepForm';
 import styles from './NewProcessModal.module.scss';
 
 export interface INewProcessModalProps {
@@ -103,9 +103,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
     && (!isNewGroup || processGroupName.trim().length > 0)
     && processDescription.trim().length > 0
     && processStepName.trim().length > 0
-    && stepValue.actionDescription.trim().length > 0
-    && stepValue.shapeOverride.length > 0
-    && stepValue.responsibleJobTitle.trim().length > 0
+    && missingRequiredFields(stepValue).length === 0
     && !saving;
 
   const handleCreate = (): void => {
@@ -200,6 +198,7 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
         onControlCreated={onControlCreated}
         onRiskCreated={onRiskCreated}
       />
+      <MissingFieldsNote value={stepValue} />
 
       <div className={styles.footer}>
         <DefaultButton text="Cancel" onClick={onDismiss} disabled={saving} />

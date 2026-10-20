@@ -13,7 +13,7 @@ import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDe
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
 import ShapeLegend from './ShapeLegend';
-import ProcessStepForm, { IProcessStepFormValue, shapeTypeToOverride } from './ProcessStepForm';
+import ProcessStepForm, { IProcessStepFormValue, shapeTypeToOverride, MissingFieldsNote, missingRequiredFields } from './ProcessStepForm';
 import styles from './SwimlaneCanvas.module.scss';
 
 export interface ISwimlaneCanvasProps {
@@ -1435,11 +1435,19 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 onControlCreated={onControlCreated}
                 onRiskCreated={onRiskCreated}
               />
-              <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked || !editDraft.actionDescription.trim() || !editDraft.shapeOverride || !editDraft.responsibleJobTitle.trim()} />
+              <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked || missingRequiredFields(editDraft).length > 0} />
+              {!isLocked && <MissingFieldsNote value={editDraft} />}
             </div>
 
             {(() => {
               const original = selectedNodeId ? stepsById.get(selectedNodeId) : undefined;
+              // Keyed to the DRAFT's shape, not just the saved one (fixed
+              // 2026-10-20 - picking "Decision" in the form above showed no
+              // Branches until the step was saved, closed and reopened).
+              // Adding a branch from an unsaved Decision saves the edit
+              // first, so the decision is real before anything links to it.
+              const draftIsDecision = editDraft.shapeOverride === 'Decision';
+              const canAddBranch = !isLocked && missingRequiredFields(editDraft).length === 0;
               // Only a Decision has real "branches" in the Yes/No sense -
               // added 2026-09-28 at the user's request ("write the next
               // step if it is a yes or no action") so both can be set up
@@ -1448,7 +1456,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               // linked to this decision (a third custom-labeled branch, or
               // one not yet labeled at all) still shows further down under
               // "Outgoing connections" as always.
-              if (!original || getShapeType(original) !== 'decision') return null;
+              if (!original || !draftIsDecision) return null;
               return (
                 <>
                   <h4>Branches</h4>
@@ -1464,8 +1472,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                         ) : (
                           <DefaultButton
                             text={`+ Add "${label}" step`}
-                            disabled={isLocked}
-                            onClick={() => onCreateBranchStep(original, label)}
+                            disabled={!canAddBranch}
+                            onClick={() => { saveEdit(); onCreateBranchStep({ ...original, responsibleJobTitle: editDraft.responsibleJobTitle }, label); }}
                           />
                         )}
                       </div>

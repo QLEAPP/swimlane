@@ -53,6 +53,23 @@ const SHAPE_OVERRIDE_BY_TYPE: Record<ShapeType, string> = {
 
 export const shapeTypeToOverride = (shapeType: ShapeType): string => SHAPE_OVERRIDE_BY_TYPE[shapeType];
 
+// The one definition of "required" every save button gates on - and what
+// MissingFieldsNote spells out, since a greyed-out button with no reason
+// read as the button having vanished (confirmed real user report,
+// 2026-10-20). Responsible in particular stays blank if a title is typed
+// but never clicked in the dropdown (see EmployeePicker).
+export const missingRequiredFields = (value: IProcessStepFormValue): string[] => [
+  !value.actionDescription.trim() && 'Action description',
+  !value.shapeOverride && 'Shape',
+  !value.responsibleJobTitle.trim() && 'Responsible (pick it from the dropdown list)'
+].filter((f): f is string => !!f);
+
+export const MissingFieldsNote: React.FC<{ value: IProcessStepFormValue }> = ({ value }) => {
+  const missing = missingRequiredFields(value);
+  if (missing.length === 0) return null;
+  return <p style={{ color: '#a4262c', margin: '4px 0 0' }}>To continue, fill in: {missing.join(', ')}</p>;
+};
+
 // Both Action and Action Type are free text in the real data (there's no
 // closed, confirmed list of every value a real export might use) - these
 // are just the ones seen so far, offered as suggestions via a freeform

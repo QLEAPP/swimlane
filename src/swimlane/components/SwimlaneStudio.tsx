@@ -42,7 +42,7 @@ import NewProcessModal from './NewProcessModal';
 import AddHierarchyShellModal, { HierarchyShellLevel } from './AddHierarchyShellModal';
 import AddStepSectionModal from './AddStepSectionModal';
 import DuplicateRegionModal from './DuplicateRegionModal';
-import ProcessStepForm, { IProcessStepFormValue } from './ProcessStepForm';
+import ProcessStepForm, { IProcessStepFormValue, MissingFieldsNote, missingRequiredFields } from './ProcessStepForm';
 import qleLogo from '../../assets/qle-logo.svg';
 
 type MainTab = 'flows' | 'employees' | 'risks' | 'controls' | 'audit' | 'improvements';
@@ -1003,7 +1003,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const newProcessPrefix = selectedProcessGroupId ? `${selectedProcessGroupId}.` : selectedCategoryId ? `${selectedCategoryId}.` : '';
 
   const handleAddStep = (): void => {
-    if (!selectedProcessId || !newStepDraft.actionDescription.trim() || !newStepDraft.shapeOverride || !newStepDraft.responsibleJobTitle.trim() || activeLock) return;
+    if (!selectedProcessId || missingRequiredFields(newStepDraft).length > 0 || activeLock) return;
     // The very first step in a brand-new region has no reference step IN
     // THAT REGION to inherit from (stepsInRegion is empty) - it used to
     // fall back straight to blank/bare defaults there, leaving Process
@@ -1077,6 +1077,11 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         setSteps(prev => [...prev, created]);
         setNewStepDraft(emptyStepDraft());
         setSaving(false);
+        // A new Decision opens its edit panel straight away so its Yes/No
+        // Branches section is right there (user request, 2026-10-20 -
+        // "once I said the step was a decision I couldn't see the yes and
+        // no branches") instead of having to go find it on the canvas.
+        if (created.shapeOverride === 'Decision') setAutoOpenStepId(created.id);
       })
       .catch((err: Error) => {
         setError(err.message);
@@ -1146,8 +1151,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       action: '',
       actionType: '',
       actionDescription: 'New step - click to edit',
-      shapeOverride: '',
-      responsibleJobTitle: '',
+      // Sensible defaults rather than blanks - both are required fields
+      // now, and blank ones left the new branch's Save button greyed out
+      // with no obvious reason. Same lane as the decision is the most
+      // common case; either can be changed in the panel that opens next.
+      shapeOverride: 'Process Step',
+      responsibleJobTitle: decisionStep.responsibleJobTitle,
       dependsOn: [token],
       edgeLabels: { [token]: label },
       linkedRisks: []
@@ -1797,9 +1806,10 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                       />
                       <PrimaryButton
                         text={saving ? 'Adding...' : 'Add step'}
-                        disabled={saving || !newStepDraft.actionDescription.trim() || !newStepDraft.shapeOverride || !newStepDraft.responsibleJobTitle.trim()}
+                        disabled={saving || missingRequiredFields(newStepDraft).length > 0}
                         onClick={handleAddStep}
                       />
+                      <MissingFieldsNote value={newStepDraft} />
                     </>
                   )}
                 </div>
