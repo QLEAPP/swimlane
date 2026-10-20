@@ -8,34 +8,65 @@ export interface IResolvedEdge {
 }
 
 /**
- * CONFIRMED: DependsOn tokens (e.g. "9.6.1.1-3") reference a row by its
- * position in the source data, not a Process Step ID - the trailing
- * number is a spreadsheet row number with the header counted as row 1, so
- * the first data row is row 2, the second is row 3, and so on.
+ * Two DependsOn token formats exist side by side:
  *
- * IMPORTANT: `steps` must be in original source order (unfiltered) for
- * this numbering to be correct - row numbers are meaningless once rows
- * have been reordered or filtered out. Resolve edges once against the
- * full dataset immediately after loading, then let the rendering layer
- * decide which resolved edges have both endpoints currently visible.
+ * - STABLE (written by the app since 2026-10-20): "[198]" - the referenced
+ *   step's own SharePoint item id, which never changes or gets reused.
+ * - LEGACY (the original source data, CSV files, and anything written
+ *   before then): e.g. "9.6.1.1-3" - CONFIRMED a row number (position in
+ *   the full, unfiltered dataset, header counted as row 1, so the first
+ *   data row is row 2), not a Process Step ID.
+ *
+ * Legacy tokens broke whenever a step was deleted (confirmed real bug,
+ * 2026-10-20): every later row moved up one, but tokens kept pointing at
+ * the old numbers, so arrows and Yes/No labels silently re-attached to
+ * the wrong steps. Every write now produces stable tokens; legacy ones
+ * are still READ correctly until convertLegacyTokens rewrites them (see
+ * the one-time "Convert links" action in SwimlaneStudio.tsx). Brackets,
+ * not e.g. "#198", deliberately - an older copy of the app still open in
+ * a tab parses trailing digits as a row number, so "#198" would have been
+ * misread as row 198 there; "[198]" just reads as unresolved instead.
+ *
+ * Every function that turns a token into a step MUST go through
+ * resolveTokenToStepId rather than parsing digits itself, or it'll
+ * misread a stable token as a row number.
+ */
+export const stableToken = (stepId: string): string => `[${stepId}]`;
+
+export function isStableToken(token: string): boolean {
+  return /^\[.+\]$/.test(token.trim());
+}
+
+/**
+ * `allSteps` must be the full unfiltered dataset in original load order -
+ * required for legacy row-number tokens (row numbers are meaningless once
+ * rows have been reordered or filtered out); stable tokens don't care.
+ */
+export function resolveTokenToStepId(allSteps: IProcessStep[], token: string): string | undefined {
+  const trimmed = token.trim();
+  const stable = /^\[(.+)\]$/.exec(trimmed);
+  if (stable) {
+    return allSteps.some(s => s.id === stable[1]) ? stable[1] : undefined;
+  }
+  const match = /(\d+)\s*$/.exec(trimmed);
+  return match ? stepIdForRowNumber(allSteps, parseInt(match[1], 10)) : undefined;
+}
+
+/**
+ * Resolve edges once against the full dataset (see resolveTokenToStepId),
+ * then let the rendering layer decide which resolved edges have both
+ * endpoints currently visible.
  */
 export function resolveDependencyEdges(orderedSteps: IProcessStep[]): IResolvedEdge[] {
-  const rowNumberToIndex = new Map<number, number>();
-  orderedSteps.forEach((_step, idx) => {
-    rowNumberToIndex.set(idx + 2, idx); // idx 0 -> row 2 (header is row 1)
-  });
-
   const edges: IResolvedEdge[] = [];
-  orderedSteps.forEach((step, idx) => {
+  orderedSteps.forEach(step => {
     step.dependsOn.forEach(token => {
-      const match = /(\d+)\s*$/.exec(token);
-      if (!match) return;
-      const targetIdx = rowNumberToIndex.get(parseInt(match[1], 10));
-      if (targetIdx === undefined || targetIdx === idx) {
+      const fromRowId = resolveTokenToStepId(orderedSteps, token);
+      if (!fromRowId || fromRowId === step.id) {
         return; // unresolved token, or a row referencing itself
       }
       edges.push({
-        fromRowId: orderedSteps[targetIdx].id,
+        fromRowId,
         toRowId: step.id,
         token,
         label: step.edgeLabels && step.edgeLabels[token] ? step.edgeLabels[token] : undefined
@@ -46,10 +77,70 @@ export function resolveDependencyEdges(orderedSteps: IProcessStep[]): IResolvedE
 }
 
 /**
+ * Rewrites every legacy row-number token on `step` (DependsOn and the
+ * matching Edge Labels keys) to its stable equivalent, resolved against
+ * `allSteps` exactly as it's drawn right now. Unresolvable legacy tokens
+ * are left untouched rather than dropped - they already draw nothing, and
+ * keeping them means nothing is lost if it turns out they mattered.
+ * Returns undefined when there's nothing to convert.
+ */
+export function convertLegacyTokens(allSteps: IProcessStep[], step: IProcessStep): IProcessStep | undefined {
+  const tokenMap = new Map<string, string>();
+  step.dependsOn.forEach(token => {
+    if (isStableToken(token)) return;
+    const resolvedId = resolveTokenToStepId(allSteps, token);
+    if (resolvedId) tokenMap.set(token, stableToken(resolvedId));
+  });
+  if (tokenMap.size === 0) return undefined;
+  const edgeLabels: { [token: string]: string } = {};
+  Object.entries(step.edgeLabels || {}).forEach(([token, label]) => {
+    edgeLabels[tokenMap.get(token) || token] = label;
+  });
+  return {
+    ...step,
+    dependsOn: step.dependsOn.map(token => tokenMap.get(token) || token),
+    edgeLabels: Object.keys(edgeLabels).length > 0 ? edgeLabels : undefined
+  };
+}
+
+/**
+ * Undo of a delete re-creates the step under a NEW SharePoint id, so
+ * stable tokens that pointed at the old one would otherwise stay dangling
+ * and the arrows into/out of it would never come back. Rewrites every
+ * "[oldId]" token (and its Edge Labels key) to "[newId]" per `idMap`;
+ * returns only the steps that actually changed.
+ */
+export function remapStableTokens(steps: IProcessStep[], idMap: Map<string, string>): IProcessStep[] {
+  const remap = (token: string): string => {
+    const stable = /^\[(.+)\]$/.exec(token.trim());
+    const newId = stable ? idMap.get(stable[1]) : undefined;
+    return newId ? stableToken(newId) : token;
+  };
+  return steps
+    .filter(step => step.dependsOn.some(token => remap(token) !== token))
+    .map(step => {
+      const edgeLabels: { [token: string]: string } = {};
+      Object.entries(step.edgeLabels || {}).forEach(([token, label]) => { edgeLabels[remap(token)] = label; });
+      return {
+        ...step,
+        dependsOn: step.dependsOn.map(remap),
+        edgeLabels: Object.keys(edgeLabels).length > 0 ? edgeLabels : undefined
+      };
+    });
+}
+
+/** Every step in `allSteps` that still has at least one convertible legacy token, already converted. */
+export function findStepsNeedingTokenConversion(allSteps: IProcessStep[]): IProcessStep[] {
+  return allSteps
+    .map(step => convertLegacyTokens(allSteps, step))
+    .filter((s): s is IProcessStep => !!s);
+}
+
+/**
  * Row number (header counted as row 1) for a step's position in the FULL
- * unfiltered dataset - the same numbering resolveDependencyEdges itself
- * uses. Shared by the add-step form and the edit panel so both convert a
- * human's "depends on" pick into a raw DependsOn token the exact same way.
+ * unfiltered dataset - legacy token numbering only (see the format note on
+ * stableToken). Still needed for CSV export and for bulk creates, where
+ * the new steps' ids aren't known until after they exist.
  */
 export function rowNumberForStepId(allSteps: IProcessStep[], stepId: string): number | undefined {
   const idx = allSteps.findIndex(s => s.id === stepId);
@@ -60,24 +151,22 @@ export function stepIdForRowNumber(allSteps: IProcessStep[], rowNumber: number):
   return allSteps[rowNumber - 2]?.id;
 }
 
-/** Human-picked "depends on" step IDs -> raw DependsOn row-number tokens. */
+/**
+ * Human-picked "depends on" step IDs -> stable DependsOn tokens. Shared by
+ * the add-step form and the edit panel so both convert a pick the exact
+ * same way.
+ */
 export function stepIdsToDependsOnTokens(allSteps: IProcessStep[], stepIds: string[]): string[] {
   return stepIds
-    .map(id => rowNumberForStepId(allSteps, id))
-    .filter((n): n is number => n !== undefined)
-    .map(n => String(n));
+    .filter(id => allSteps.some(s => s.id === id))
+    .map(stableToken);
 }
 
-/** Raw DependsOn tokens -> the step IDs they resolve to (for pre-populating a picker from existing data). */
+/** DependsOn tokens (either format) -> the step IDs they resolve to (for pre-populating a picker from existing data). */
 export function dependsOnTokensToStepIds(allSteps: IProcessStep[], tokens: string[]): string[] {
-  const ids: string[] = [];
-  tokens.forEach(token => {
-    const match = /(\d+)\s*$/.exec(token);
-    if (!match) return;
-    const stepId = stepIdForRowNumber(allSteps, parseInt(match[1], 10));
-    if (stepId) ids.push(stepId);
-  });
-  return ids;
+  return tokens
+    .map(token => resolveTokenToStepId(allSteps, token))
+    .filter((id): id is string => !!id);
 }
 
 /**
@@ -104,8 +193,7 @@ export function buildEdgeLabels(
   Object.entries(edgeLabelsByDependsOnId).forEach(([stepId, label]) => {
     const trimmed = label.trim();
     if (!trimmed || !dependsOnStepIds.includes(stepId)) return;
-    const rowNumber = rowNumberForStepId(allSteps, stepId);
-    if (rowNumber !== undefined) edgeLabels[String(rowNumber)] = trimmed;
+    if (allSteps.some(s => s.id === stepId)) edgeLabels[stableToken(stepId)] = trimmed;
   });
   return edgeLabels;
 }
@@ -114,9 +202,7 @@ export function buildEdgeLabels(
 export function edgeLabelsToDependsOnDraft(allSteps: IProcessStep[], edgeLabels: { [token: string]: string } | undefined): { [stepId: string]: string } {
   const draft: { [stepId: string]: string } = {};
   Object.entries(edgeLabels || {}).forEach(([token, label]) => {
-    const match = /(\d+)\s*$/.exec(token);
-    if (!match) return;
-    const stepId = stepIdForRowNumber(allSteps, parseInt(match[1], 10));
+    const stepId = resolveTokenToStepId(allSteps, token);
     if (stepId) draft[stepId] = label;
   });
   return draft;

@@ -8,7 +8,7 @@ import { IControlStatement } from '../models/IControlStatement';
 import { IEmployee } from '../models/IEmployee';
 import { IDataService } from '../services/IDataService';
 import { SwimlaneStage } from '../models/ISwimlaneStatus';
-import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft } from '../utils/dependencyResolution';
+import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft, convertLegacyTokens } from '../utils/dependencyResolution';
 import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder } from '../utils/columns';
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
@@ -600,7 +600,13 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // the token.
     const existingStepIds = dependsOnTokensToStepIds(allSteps, targetStep.dependsOn);
     if (existingStepIds.includes(sourceId)) return;
-    onEditStep({ ...targetStep, dependsOn: stepIdsToDependsOnTokens(allSteps, [...existingStepIds, sourceId]) });
+    // Appends to the existing tokens rather than rebuilding them all from
+    // ids - rebuilding re-keyed every link, so the target's existing Yes/No
+    // labels (keyed by the OLD token text) silently stopped matching and
+    // vanished. Legacy tokens are converted on the way through, labels
+    // and all, since this step is being rewritten anyway.
+    const base = convertLegacyTokens(allSteps, targetStep) || targetStep;
+    onEditStep({ ...base, dependsOn: [...base.dependsOn, ...stepIdsToDependsOnTokens(allSteps, [sourceId])] });
   };
 
   // Only edges whose both ends are currently rendered - the rest belong to

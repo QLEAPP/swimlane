@@ -15,7 +15,9 @@ import { IProcessIdLabel } from '../models/IProcessIdLabel';
 import { IProcessIdLock, findActiveLock } from '../models/IProcessIdLock';
 import { ISwimlaneComment } from '../models/ISwimlaneComment';
 import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
-import { resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels } from '../utils/dependencyResolution';
+import {
+  resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, findStepsNeedingTokenConversion, remapStableTokens
+} from '../utils/dependencyResolution';
 import { computeInsertOrderBefore, computeInsertOrderAfter, compareProcessStepIds } from '../utils/columns';
 import { buildExportCsv, downloadTextFile } from '../utils/csvExport';
 import { ADMIN_UNLOCK_PASSWORD } from '../adminConfig';
@@ -167,6 +169,11 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [backfillDialogOpen, setBackfillDialogOpen] = React.useState(false);
   const [backfilling, setBackfilling] = React.useState(false);
   const [backfillMessage, setBackfillMessage] = React.useState<string | undefined>(undefined);
+  // One-time conversion of legacy row-number links to stable ones - see
+  // stableToken in utils/dependencyResolution.ts and handleConvertLinks.
+  const [convertLinksDialogOpen, setConvertLinksDialogOpen] = React.useState(false);
+  const [convertingLinks, setConvertingLinks] = React.useState(false);
+  const [convertLinksMessage, setConvertLinksMessage] = React.useState<string | undefined>(undefined);
   const [renameTarget, setRenameTarget] = React.useState<{ level: 'category' | 'processGroup' | 'processId'; id: string; currentLabel: string } | undefined>(undefined);
   const [renameValue, setRenameValue] = React.useState('');
   // Separate from renameTarget/renameValue above - a section isn't a
@@ -548,8 +555,19 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     if (previous) pushUndo({ type: 'edit', previous });
   };
 
+  // While any legacy row-number link still exists, a delete would shift
+  // every later row and silently re-point those links at the wrong steps
+  // (see stableToken) - so every delete path asks for the one-time
+  // conversion first instead of doing the damage. Returns true if blocked.
+  const blockDeleteForLegacyLinks = (): boolean => {
+    if (legacyLinkConversions.length === 0) return false;
+    setConvertLinksDialogOpen(true);
+    return true;
+  };
+
   const handleDeleteStep = (stepId: string): void => {
     if (activeLock) return; // defense in depth - SwimlaneCanvas's isLocked prop already hides the delete affordance
+    if (blockDeleteForLegacyLinks()) return;
     const step = steps.find(s => s.id === stepId);
     setSteps(prev => prev.filter(s => s.id !== stepId));
     dataService.deleteProcessStep(stepId).catch((err: Error) => setError(err.message));
@@ -564,6 +582,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // arbitrary set of ids instead of a whole flow/section.
   const handleDeleteSteps = (stepIds: string[]): void => {
     if (activeLock) return; // defense in depth - SwimlaneCanvas's isLocked prop already hides the delete affordance
+    if (blockDeleteForLegacyLinks()) return;
     const deleted = steps.filter(s => stepIds.includes(s.id));
     if (deleted.length === 0) return;
     setSteps(prev => prev.filter(s => !stepIds.includes(s.id)));
@@ -579,6 +598,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // deleting each of its steps one at a time via the edit panel.
   const handleBulkDelete = (): void => {
     if (activeLock) return; // defense in depth - the menu item that opens this is already disabled while locked
+    if (blockDeleteForLegacyLinks()) { setBulkDeleteOpen(false); return; }
     const deleted = visibleSteps.slice();
     const idsToDelete = deleted.map(s => s.id);
     setSteps(prev => prev.filter(s => !idsToDelete.includes(s.id)));
@@ -609,19 +629,30 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         setSteps(prev => prev.map(s => (s.id === stamped.id ? stamped : s)));
         dataService.updateProcessStep(stamped).catch((err: Error) => setError(err.message));
       });
-    } else if (action.type === 'delete') {
-      const { id: _id, ...rest } = action.step;
-      dataService.addProcessStep(rest)
-        .then(created => setSteps(prev => [...prev, created]))
-        .catch((err: Error) => setError(err.message));
     } else {
-      action.steps.forEach(step => {
-        const { id: _id, ...rest } = step;
-        dataService.addProcessStep(rest)
-          .then(created => setSteps(prev => [...prev, created]))
-          .catch((err: Error) => setError(err.message));
-      });
+      restoreDeletedSteps(action.type === 'delete' ? [action.step] : action.steps)
+        .catch((err: Error) => setError(err.message));
     }
+  };
+
+  // Re-creates deleted steps (they can only come back under NEW SharePoint
+  // ids), then points every link that referenced an old id - from the
+  // steps still on screen AND between the restored steps themselves - at
+  // its replacement, so the arrows come back too (see remapStableTokens).
+  // Sequential so idMap is complete before anything is remapped.
+  const restoreDeletedSteps = async (deleted: IProcessStep[]): Promise<void> => {
+    const remaining = steps;
+    const idMap = new Map<string, string>();
+    const created: IProcessStep[] = [];
+    for (const step of deleted) {
+      const { id: oldId, ...rest } = step;
+      const restored = await dataService.addProcessStep(rest);
+      idMap.set(oldId, restored.id);
+      created.push(restored);
+      setSteps(prev => [...prev, restored]);
+    }
+    const relinked = remapStableTokens([...remaining, ...created], idMap);
+    await saveConvertedSteps(relinked);
   };
 
   // Pops and reverts just the MOST RECENT action, not the whole stack -
@@ -649,12 +680,62 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     setUndoStack(prev => prev.slice(0, index));
   };
 
+  // Every step that still has a legacy row-number link, already converted
+  // to stable tokens (see stableToken) - drives the "Convert links" banner.
+  const legacyLinkConversions = React.useMemo(() => findStepsNeedingTokenConversion(steps), [steps]);
+
+  // Writes already-converted steps back one at a time (sequential, same
+  // reasoning as addProcessSteps - a burst of parallel PATCHes is what
+  // Graph throttles) and swaps them into state as each one lands, so a
+  // failure part-way leaves state matching exactly what SharePoint has.
+  const saveConvertedSteps = async (converted: IProcessStep[]): Promise<number> => {
+    let saved = 0;
+    for (const step of converted) {
+      await dataService.updateProcessStep(step);
+      setSteps(prev => prev.map(s => (s.id === step.id ? step : s)));
+      saved++;
+    }
+    return saved;
+  };
+
+  const handleConvertLinks = (): void => {
+    const toConvert = legacyLinkConversions;
+    setConvertingLinks(true);
+    saveConvertedSteps(toConvert)
+      .then(count => {
+        setConvertingLinks(false);
+        setConvertLinksDialogOpen(false);
+        setConvertLinksMessage(`Converted links on ${count} step${count === 1 ? '' : 's'}. Deleting steps can no longer move arrows or labels.`);
+      })
+      .catch((err: Error) => {
+        // Safe to just retry - whatever already saved is already stable
+        // and drops out of legacyLinkConversions on its own.
+        setConvertingLinks(false);
+        setConvertLinksDialogOpen(false);
+        setError(`Converting links stopped part-way: ${err.message} - click "Convert links" again to finish the rest.`);
+      });
+  };
+
+  // CSV import and region duplication can only write LEGACY row-number
+  // links (the new steps' ids don't exist until they're created - see
+  // prepareStepsForImport/buildDuplicatedSteps), so they're converted to
+  // stable ones immediately after landing, before any delete could shift
+  // the rows they point at.
+  const convertNewlyCreated = (created: IProcessStep[]): void => {
+    const fullList = [...steps, ...created];
+    const createdIds = new Set(created.map(s => s.id));
+    const converted = findStepsNeedingTokenConversion(fullList).filter(s => createdIds.has(s.id));
+    saveConvertedSteps(converted).catch((err: Error) => setError(err.message));
+  };
+
   const handleImported = (created: IProcessStep[]): void => {
     setSteps(prev => [...prev, ...created]);
+    convertNewlyCreated(created);
   };
 
   const handleDuplicated = (created: IProcessStep[]): void => {
     setSteps(prev => [...prev, ...created]);
+    convertNewlyCreated(created);
   };
 
   // Always the FULL current dataset, regardless of whatever category/
@@ -860,6 +941,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // whatever local removal already happened" pattern as handleBulkDelete.
   const handleDeleteSectionConfirm = (): void => {
     if (!renameSectionTarget) return;
+    if (blockDeleteForLegacyLinks()) { setDeleteSectionConfirmOpen(false); return; }
     const targetId = renameSectionTarget.processStepId;
     const deleted = stepsInSameRegionAs(steps.filter(s => s.processStepId === targetId));
     const idsToDelete = deleted.map(s => s.id);
@@ -1332,6 +1414,21 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         </DialogFooter>
       </Dialog>
 
+      <Dialog
+        hidden={!convertLinksDialogOpen}
+        onDismiss={() => { if (!convertingLinks) setConvertLinksDialogOpen(false); }}
+        dialogContentProps={{
+          type: DialogType.normal,
+          title: 'Convert step links?',
+          subText: `Rewrites the DependsOn and Edge Labels columns on ${legacyLinkConversions.length} step${legacyLinkConversions.length === 1 ? '' : 's'} so each link points at the other step's permanent SharePoint ID instead of its list position. Every arrow and Yes/No label stays exactly as it's drawn right now. One-time - after this, deleting steps can no longer move links. Ask anyone else with the app open to reload it afterwards.`
+        }}
+      >
+        <DialogFooter>
+          <DefaultButton text="Cancel" onClick={() => setConvertLinksDialogOpen(false)} disabled={convertingLinks} />
+          <PrimaryButton text={convertingLinks ? 'Converting...' : 'Convert links'} onClick={handleConvertLinks} disabled={convertingLinks} />
+        </DialogFooter>
+      </Dialog>
+
       {/* TEMPORARY - see the interface comment on IDataService.backfillUniqueIds. */}
       <Dialog
         hidden={!backfillDialogOpen}
@@ -1561,6 +1658,21 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
             </MessageBar>
           );
         })()}
+
+        {(legacyLinkConversions.length > 0 || convertLinksMessage) && (
+          <MessageBar
+            messageBarType={legacyLinkConversions.length > 0 ? MessageBarType.severeWarning : MessageBarType.success}
+            isMultiline
+            onDismiss={legacyLinkConversions.length > 0 ? undefined : () => setConvertLinksMessage(undefined)}
+            actions={legacyLinkConversions.length > 0
+              ? <MessageBarButton onClick={() => setConvertLinksDialogOpen(true)}>Convert links</MessageBarButton>
+              : undefined}
+          >
+            {legacyLinkConversions.length > 0
+              ? `${legacyLinkConversions.length} step${legacyLinkConversions.length === 1 ? ' still links' : 's still link'} to other steps the old way (by list position). Until converted, deleting a step can attach arrows and Yes/No labels to the wrong steps - convert once, before deleting anything.`
+              : convertLinksMessage}
+          </MessageBar>
+        )}
 
         <Pivot
           className={styles.mainTabs}

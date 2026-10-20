@@ -1,4 +1,5 @@
 ﻿import { IProcessStep, parseDependsOn, extractRegionFromApqcTitle } from '../models/IProcessStep';
+import { isStableToken } from './dependencyResolution';
 
 /**
  * Minimal RFC4180 CSV parser (no external dependency): handles quoted
@@ -260,6 +261,10 @@ export function buildImportPreview(csvText: string): ICsvImportPreview {
  * token's own prefix text is cosmetic and left as-is.
  */
 export function remapDependsOnToken(token: string, insertionIndex: number): string {
+  // A stable "[id]" token (see stableToken in dependencyResolution.ts)
+  // already names a real item, not a file row - nothing to shift. Only
+  // reachable from a hand-edited file; buildExportCsv always writes rows.
+  if (isStableToken(token)) return token;
   return token.replace(/(\d+)\s*$/, (_match, digits: string) => String(insertionIndex + parseInt(digits, 10)));
 }
 

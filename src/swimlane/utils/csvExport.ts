@@ -1,4 +1,5 @@
 import { IProcessStep } from '../models/IProcessStep';
+import { resolveTokenToStepId, rowNumberForStepId } from './dependencyResolution';
 
 // Same column set, same order, as documented in ImportCsvModal's own
 // instructions text - so a file this produces is immediately valid input
@@ -31,6 +32,17 @@ function escapeCsvField(value: string): string {
  */
 export function buildExportCsv(steps: IProcessStep[]): string {
   const lines = [EXPORT_HEADERS.join(',')];
+  // Stable "[id]" tokens mean nothing outside this exact SharePoint list,
+  // so every token is written out as a legacy row number within THIS file
+  // (same "processStepId-row" shape as the original source data), which is
+  // what Import CSV expects - see resolveTokenToStepId. Unresolvable tokens
+  // are dropped rather than exported pointing nowhere.
+  const toFileToken = (token: string): string | undefined => {
+    const stepId = resolveTokenToStepId(steps, token);
+    const row = stepId ? rowNumberForStepId(steps, stepId) : undefined;
+    const target = stepId ? steps.find(s => s.id === stepId) : undefined;
+    return row !== undefined && target ? `${target.processStepId}-${row}` : undefined;
+  };
   steps.forEach(step => {
     const row = [
       step.apqcTitle,
@@ -42,7 +54,7 @@ export function buildExportCsv(steps: IProcessStep[]): string {
       step.actionDescription,
       step.responsibleJobTitle,
       step.shapeOverride || '',
-      step.dependsOn.join('\n'),
+      step.dependsOn.map(toFileToken).filter((t): t is string => !!t).join('\n'),
       step.region || ''
     ];
     lines.push(row.map(escapeCsvField).join(','));

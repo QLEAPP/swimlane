@@ -51,7 +51,12 @@ export function buildDuplicatedSteps(
       const [resolvedId] = dependsOnTokensToStepIds(allSteps, [token]);
       if (resolvedId && sourceIds.has(resolvedId)) {
         const localRow = localRowNumberById.get(resolvedId) as number;
-        tokenMap.set(token, token.replace(/(\d+)\s*$/, () => String(insertionIndex + localRow)));
+        // Written as a LEGACY row-number token on purpose - the new copy's
+        // own id doesn't exist until it's created, so there's no stable
+        // token to write yet. DuplicateRegionModal converts these to
+        // stable tokens straight after the batch lands (see
+        // convertLegacyTokens), before any delete could shift rows.
+        tokenMap.set(token, `${step.processStepId}-${insertionIndex + localRow}`);
       } else {
         tokenMap.set(token, undefined);
         droppedDependencyCount += 1;
