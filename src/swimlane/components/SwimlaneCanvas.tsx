@@ -1274,6 +1274,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
             defaultValue={edgePopup.edge.label || ''}
             onChange={(_e, v) => setDraftLabels(prev => ({ ...prev, [draftKey(edgePopup.edge)]: v || '' }))}
             onBlur={() => saveLabel(edgePopup.edge)}
+            // Enter commits and closes (user request, 2026-10-20) - the label
+            // used to save only on blur, i.e. after clicking somewhere else.
+            // Blurring (not calling saveLabel directly) so it saves exactly
+            // once, through the same path as clicking away.
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return;
+              (e.target as HTMLInputElement).blur();
+              setEdgePopup(undefined);
+            }}
           />
           <DefaultButton
             text="Remove dependency"
@@ -1565,6 +1574,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                   defaultValue={edge.label || ''}
                   onChange={(e) => setDraftLabels(prev => ({ ...prev, [draftKey(edge)]: e.target.value }))}
                   onBlur={() => saveLabel(edge)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                 />
               </div>
             ))}

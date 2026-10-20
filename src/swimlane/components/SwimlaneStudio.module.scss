@@ -161,32 +161,14 @@
   font-size: var(--fs-base);
 }
 
-// Was a single fixed-width (480px) column - on a wide screen that left a
-// large dead gap of empty canvas to its right with nothing in it. Each
-// field (ProcessStepForm renders them as plain siblings, not its own
-// wrapper) now flexes to fill the available width and wraps into however
-// many columns fit, instead of stacking one per row indefinitely - reads
-// as a deliberate multi-column form instead of an orphaned narrow strip.
+// Lives inside the "Add a step" side panel now (2026-10-20), not as a
+// card under the canvas - the panel already supplies the surface, header
+// and padding, so this is just a plain one-field-per-row column that
+// reads top to bottom in the panel's narrower width.
 .addStepForm {
-  margin-top: 20px;
-  padding: 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  max-width: 900px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 4px 20px;
-
-  > h3 {
-    flex-basis: 100%;
-    margin: 0 0 4px;
-  }
+  padding-top: 8px;
 
   > * {
-    flex: 1 1 250px;
     margin-bottom: 12px;
   }
 }

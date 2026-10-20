@@ -181,6 +181,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [selectedFlowRegion, setSelectedFlowRegion] = React.useState<string | undefined>(savedNav.flowRegion);
 
   const [newStepDraft, setNewStepDraft] = React.useState<IProcessStepFormValue>(emptyStepDraft());
+  const [addStepOpen, setAddStepOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [newProcessOpen, setNewProcessOpen] = React.useState(false);
@@ -1226,7 +1227,12 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         // Branches section is right there (user request, 2026-10-20 -
         // "once I said the step was a decision I couldn't see the yes and
         // no branches") instead of having to go find it on the canvas.
-        if (created.shapeOverride === 'Decision') setAutoOpenStepId(created.id);
+        // The add-step panel closes for it, so the Decision's edit panel
+        // isn't opening half-hidden behind it.
+        if (created.shapeOverride === 'Decision') {
+          setAddStepOpen(false);
+          setAutoOpenStepId(created.id);
+        }
       })
       .catch((err: Error) => {
         setError(err.message);
@@ -1850,6 +1856,9 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   )}
                   <div className={styles.toolbarRow}>
                     <DefaultButton text="Back to Process IDs" onClick={() => { setSelectedProcessId(undefined); setDrilledDownStepId(undefined); setSelectedFlowRegion(undefined); }} />
+                    {!activeLock && (
+                      <PrimaryButton text="Add a step" iconProps={{ iconName: 'Add' }} onClick={() => setAddStepOpen(true)} />
+                    )}
                     {activeLock ? (
                       <DefaultButton
                         text="Unlock swimlane"
@@ -1956,9 +1965,23 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   onToggleStage={handleToggleStage}
                 />
 
+                {/*
+                  A side panel opened from the toolbar's "+ Add a step", not a
+                  card permanently under the canvas (user request, 2026-10-20 -
+                  "it just becomes cumbersome and reduces the screen"). Non-
+                  blocking, so the flow stays visible and usable beside it, and
+                  it stays open after adding so several steps can go in a row.
+                */}
                 {!activeLock && (
+                <Panel
+                  isOpen={addStepOpen}
+                  onDismiss={() => setAddStepOpen(false)}
+                  isBlocking={false}
+                  type={PanelType.medium}
+                  headerText="Add a step"
+                  closeButtonAriaLabel="Close"
+                >
                 <div className={styles.addStepForm}>
-                  <h3 className={styles.cardTitle}>Add a step</h3>
                   {addBlockedInAllView ? (() => {
                     const regionsInUse = Array.from(new Set(stepsInProcessId.map(s => s.region).filter((r): r is string => !!r)));
                     return (
@@ -1992,6 +2015,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                     </>
                   )}
                 </div>
+                </Panel>
                 )}
 
                 <SwimlaneComments comments={commentsForSwimlane} />
