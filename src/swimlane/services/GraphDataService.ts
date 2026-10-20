@@ -329,7 +329,15 @@ export class GraphDataService implements IDataService {
       modifiedBy: GraphDataService._identityName(item.lastModifiedBy),
       modifiedAt: item.lastModifiedDateTime
     }));
-    this._cachedProcessSteps = result;
+    // A COPY, never the same array handed back to the caller - confirmed
+    // real bug (2026-10-20, "if I just add a step it creates two identical
+    // steps"): SwimlaneStudio puts the returned array straight into React
+    // state, so addProcessStep's push onto this cache was silently
+    // mutating that state array too, and handleAddStep's own
+    // `[...prev, created]` then appended the same step a second time. Only
+    // the FIRST add after a load hit it - any other state update (e.g.
+    // creating a section) replaced the state array and broke the sharing.
+    this._cachedProcessSteps = [...result];
     return result;
   }
 
