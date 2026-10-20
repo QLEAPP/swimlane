@@ -1856,9 +1856,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   )}
                   <div className={styles.toolbarRow}>
                     <DefaultButton text="Back to Process IDs" onClick={() => { setSelectedProcessId(undefined); setDrilledDownStepId(undefined); setSelectedFlowRegion(undefined); }} />
-                    {!activeLock && (
-                      <PrimaryButton text="Add a step" iconProps={{ iconName: 'Add' }} onClick={() => setAddStepOpen(true)} />
-                    )}
+                    {/*
+                      Shown (greyed out, saying why) even while locked rather
+                      than hidden - user request, 2026-10-20: a button that
+                      just vanishes leaves people wondering why they can't
+                      add a step. The lock banner above gives who/when/why.
+                    */}
+                    <PrimaryButton
+                      text={activeLock ? 'Add a step (locked)' : 'Add a step'}
+                      iconProps={{ iconName: activeLock ? 'Lock' : 'Add' }}
+                      title={activeLock ? 'This swimlane is locked - unlock it to add or edit steps.' : undefined}
+                      disabled={!!activeLock}
+                      allowDisabledFocus
+                      onClick={() => setAddStepOpen(true)}
+                    />
                     {activeLock ? (
                       <DefaultButton
                         text="Unlock swimlane"
