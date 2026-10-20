@@ -517,7 +517,11 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const key = draftKey(edge);
-    edgeDragStartRef.current = { startClientY: e.clientY, startOffset: edgeYOffsets[key] ?? currentY };
+    // From where the bend is actually DRAWN, not the stored value - a
+    // stored value can sit past the bottom of the grid (see maxBendY,
+    // which clamps it on screen), and starting from that hidden value made
+    // dragging back up appear to do nothing until the pointer caught up.
+    edgeDragStartRef.current = { startClientY: e.clientY, startOffset: currentY };
     setDraggingEdgeKey(key);
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -661,6 +665,12 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       svgRef.current.style.width = `${canvas.scrollWidth}px`;
       svgRef.current.style.height = `${canvas.scrollHeight}px`;
     }
+    // Lowest Y an arrow's bend may sit at and still be drawn - anything
+    // past the grid's own bottom falls outside the SVG and simply vanishes
+    // (confirmed real user report, 2026-10-20: "arrows that go down at the
+    // bottom that we can't even see"). Manually-dragged bends get clamped
+    // to this, including ones already saved from before this fix.
+    const maxBendY = canvas.scrollHeight - 14;
 
     const rectById = new Map<string, IRect>();
     orderedSteps.forEach(step => {
@@ -846,11 +856,41 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // the spread reads left-to-right sensibly instead of crossing more
     // than it has to), then hand out symmetric offsets around the center.
     interface IAttachment { edge: IResolvedEdge; role: 'from' | 'to'; side: Side; otherCx: number; otherCy: number }
+    // Where each localHop/highway edge's horizontal run sits - worked out
+    // BEFORE the attachment spreading below, since a run dragged below a
+    // box now leaves/enters through that box's bottom instead of its top
+    // (see highwayPath), which changes which side it competes for.
+    // A manually-dragged Y wins over the automatic track when one's set
+    // for this edge AND it's still safe against the CURRENT layout (see
+    // customYIsSafe) - checked at the boxes' centres, since the per-edge
+    // spread offsets depend on this very decision.
+    const bendY = new Map<IResolvedEdge, number>();
+    candidates.forEach(c => {
+      if (c.tier === 'direct') return;
+      const customY = edgeYOffsets[draftKey(c.edge)];
+      const clampedY = customY === undefined ? undefined : Math.min(customY, maxBendY);
+      if (clampedY !== undefined && customYIsSafe(c.a.cx, c.b.cx, clampedY)) {
+        bendY.set(c.edge, clampedY);
+        return;
+      }
+      if (c.tier === 'localHop') {
+        const track = localHopTracks.get(c.edge) || 0;
+        const laneTop = laneMinTop.get(c.lane || 'Unassigned');
+        const baseTop = laneTop === undefined ? Math.min(c.a.top, c.b.top) : laneTop;
+        bendY.set(c.edge, baseTop - LOCAL_HOP_CLEARANCE + LOCAL_HOP_TRACK_Y[track % LOCAL_HOP_TRACK_Y.length]);
+        return;
+      }
+      const track = highwayTracks.get(c.edge) || 0;
+      bendY.set(c.edge, highwayBaseY + HIGHWAY_TRACK_Y[track % HIGHWAY_TRACK_Y.length]);
+    });
+    const verticalSide = (rect: IRect, y: number): Side => (y > rect.bottom ? 'bottom' : 'top');
+
     const attachments: IAttachment[] = [];
     candidates.forEach(c => {
-      const sides = c.tier === 'direct'
+      const y = bendY.get(c.edge);
+      const sides = c.tier === 'direct' || y === undefined
         ? pickSides(c.a, c.b)
-        : { fromSide: 'top' as Side, toSide: 'top' as Side }; // localHop/highway always attach from the top
+        : { fromSide: verticalSide(c.a, y), toSide: verticalSide(c.b, y) };
       attachments.push({ edge: c.edge, role: 'from', side: sides.fromSide, otherCx: c.b.cx, otherCy: c.b.cy });
       attachments.push({ edge: c.edge, role: 'to', side: sides.toSide, otherCx: c.a.cx, otherCy: c.a.cy });
     });
@@ -879,35 +919,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       });
     });
 
-    const geometries: IEdgeGeometry[] = candidates.map(({ edge, a, b, tier, lane }) => {
+    const geometries: IEdgeGeometry[] = candidates.map(({ edge, a, b, tier }) => {
       const aOffset = fromOffset.get(edge) || 0;
       const bOffset = toOffset.get(edge) || 0;
-      if (tier === 'direct') {
+      const y = bendY.get(edge);
+      if (tier === 'direct' || y === undefined) {
         const result = connectorPath(a, b, aOffset, bOffset);
         return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: false };
       }
-      // A manually-dragged Y (see edgeYOffsets above) wins over the
-      // automatic track assignment when one's been set for this specific
-      // edge AND it's still safe against the CURRENT layout - the whole
-      // point is overriding the auto layout, not just nudging it, but a
-      // frozen pixel value from before a lane reorder/reassignment is only
-      // trustworthy as long as nothing has since moved into its way (see
-      // customYIsSafe above).
-      const customY = edgeYOffsets[draftKey(edge)];
-      const x1 = a.cx + aOffset;
-      const x2 = b.cx + bOffset;
-      const customYUsable = customY !== undefined && customYIsSafe(x1, x2, customY);
-      if (tier === 'localHop') {
-        const track = localHopTracks.get(edge) || 0;
-        const laneTop = laneMinTop.get(lane || 'Unassigned');
-        const baseTop = laneTop === undefined ? Math.min(a.top, b.top) : laneTop;
-        const autoHopY = baseTop - LOCAL_HOP_CLEARANCE + LOCAL_HOP_TRACK_Y[track % LOCAL_HOP_TRACK_Y.length];
-        const result = highwayPath(a, b, customYUsable ? customY : autoHopY, aOffset, bOffset);
-        return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
-      }
-      const track = highwayTracks.get(edge) || 0;
-      const autoHighwayY = highwayBaseY + HIGHWAY_TRACK_Y[track % HIGHWAY_TRACK_Y.length];
-      const result = highwayPath(a, b, customYUsable ? customY : autoHighwayY, aOffset, bOffset);
+      const result = highwayPath(a, b, y, aOffset, bOffset);
       return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);

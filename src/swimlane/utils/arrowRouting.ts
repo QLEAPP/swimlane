@@ -205,8 +205,19 @@ export function highwayPath(a: IRect, b: IRect, highwayY: number, aOffset = 0, b
   const x1 = a.cx + aOffset;
   const x2 = b.cx + bOffset;
   const hDir = x2 >= x1 ? 1 : -1;
+  // A run dragged BELOW a box leaves/enters through that box's bottom
+  // instead of its top (user request, 2026-10-20 - "move the arrow for it
+  // to start at the bottom so that it doesn't criss-cross"). Before, it
+  // always attached at the top and so drew straight down through the box
+  // to reach a run underneath it. Decided per end, so an arrow can leave
+  // one box's bottom and still drop into the other's top.
+  const y1 = highwayY > a.bottom ? a.bottom : a.top;
+  const y2 = highwayY > b.bottom ? b.bottom : b.top;
+  // Corner curls toward the run from whichever side the tick comes from.
+  const c1 = highwayY + (y1 > highwayY ? r : -r);
+  const c2 = highwayY + (y2 > highwayY ? r : -r);
   return {
-    d: `M ${x1} ${a.top} L ${x1} ${highwayY + r} Q ${x1} ${highwayY} ${x1 + hDir * r} ${highwayY} L ${x2 - hDir * r} ${highwayY} Q ${x2} ${highwayY} ${x2} ${highwayY + r} L ${x2} ${b.top}`,
+    d: `M ${x1} ${y1} L ${x1} ${c1} Q ${x1} ${highwayY} ${x1 + hDir * r} ${highwayY} L ${x2 - hDir * r} ${highwayY} Q ${x2} ${highwayY} ${x2} ${c2} L ${x2} ${y2}`,
     labelX: (x1 + x2) / 2,
     labelY: highwayY
   };
