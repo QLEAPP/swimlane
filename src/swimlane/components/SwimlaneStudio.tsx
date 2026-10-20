@@ -49,6 +49,40 @@ import qleLogo from '../../assets/qle-logo.svg';
 
 type MainTab = 'flows' | 'employees' | 'risks' | 'controls' | 'audit' | 'improvements';
 
+// Where the viewer was when they last left/refreshed the page - added
+// 2026-10-20 at the user's request ("after refreshing can the page reload
+// from where I am instead of restarting from the home page"). Per-viewer,
+// per-browser display state only (same localStorage approach as the lane
+// order and arrow bends in SwimlaneCanvas), never written to SharePoint.
+const NAV_STORAGE_KEY = 'swimlane-nav';
+const MAIN_TABS: MainTab[] = ['flows', 'employees', 'risks', 'controls', 'audit', 'improvements'];
+
+interface ISavedNav {
+  activeTab?: MainTab;
+  categoryId?: string;
+  processGroupId?: string;
+  processId?: string;
+  flowRegion?: string;
+  drilledDownStepId?: string;
+}
+
+function readSavedNav(): ISavedNav {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(NAV_STORAGE_KEY) || '{}');
+    const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+    return {
+      activeTab: MAIN_TABS.includes(parsed.activeTab) ? parsed.activeTab : undefined,
+      categoryId: str(parsed.categoryId),
+      processGroupId: str(parsed.processGroupId),
+      processId: str(parsed.processId),
+      flowRegion: str(parsed.flowRegion),
+      drilledDownStepId: str(parsed.drilledDownStepId)
+    };
+  } catch {
+    return {};
+  }
+}
+
 // Full multi-level undo stack (changed 2026-09-15 at the user's request -
 // was single-level, only ever covering the one most recent action) -
 // covers every action that loses data outright: deleting a step,
@@ -134,14 +168,17 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // Process ID (e.g. "9.6.1", the existing swimlane-per-flow level) - see
   // utils/apqcHierarchy.ts. Each level's picker is only reachable once its
   // parent is chosen, and clearing a level clears everything below it.
-  const [selectedCategoryId, setSelectedCategoryId] = React.useState<string | undefined>(undefined);
-  const [selectedProcessGroupId, setSelectedProcessGroupId] = React.useState<string | undefined>(undefined);
-  const [selectedProcessId, setSelectedProcessId] = React.useState<string | undefined>(undefined);
-  const [drilledDownStepId, setDrilledDownStepId] = React.useState<string | undefined>(undefined);
+  // Initial values come from wherever this viewer last was (see
+  // readSavedNav) so a page refresh lands back on the same screen.
+  const [savedNav] = React.useState(readSavedNav);
+  const [selectedCategoryId, setSelectedCategoryId] = React.useState<string | undefined>(savedNav.categoryId);
+  const [selectedProcessGroupId, setSelectedProcessGroupId] = React.useState<string | undefined>(savedNav.processGroupId);
+  const [selectedProcessId, setSelectedProcessId] = React.useState<string | undefined>(savedNav.processId);
+  const [drilledDownStepId, setDrilledDownStepId] = React.useState<string | undefined>(savedNav.drilledDownStepId);
   // Which region's variant of the current Process ID's flow is showing -
   // undefined = "All" regions combined. See FlowRegionTabs for the full
   // reasoning.
-  const [selectedFlowRegion, setSelectedFlowRegion] = React.useState<string | undefined>(undefined);
+  const [selectedFlowRegion, setSelectedFlowRegion] = React.useState<string | undefined>(savedNav.flowRegion);
 
   const [newStepDraft, setNewStepDraft] = React.useState<IProcessStepFormValue>(emptyStepDraft());
   const [saving, setSaving] = React.useState(false);
@@ -221,7 +258,30 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // and stays reachable any time via the "Undo history" button.
   const [showUndoBanner, setShowUndoBanner] = React.useState(false);
   const [undoHistoryOpen, setUndoHistoryOpen] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<MainTab>('flows');
+  const [activeTab, setActiveTab] = React.useState<MainTab>(savedNav.activeTab || 'flows');
+
+  // Remembers where this viewer is, for readSavedNav on the next load.
+  // Each level is only kept while its parent is - "Back to Categories"
+  // only clears the category itself, leaving the lower levels' state
+  // behind, and those stale values mustn't come back on a refresh.
+  React.useEffect(() => {
+    const processGroupId = selectedCategoryId ? selectedProcessGroupId : undefined;
+    const processId = processGroupId ? selectedProcessId : undefined;
+    const nav: ISavedNav = {
+      activeTab,
+      categoryId: selectedCategoryId,
+      processGroupId,
+      processId,
+      flowRegion: processId ? selectedFlowRegion : undefined,
+      drilledDownStepId: processId ? drilledDownStepId : undefined
+    };
+    try {
+      window.localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify(nav));
+    } catch {
+      // Best-effort only - the app works the same, it just opens on the
+      // home screen next time.
+    }
+  }, [activeTab, selectedCategoryId, selectedProcessGroupId, selectedProcessId, selectedFlowRegion, drilledDownStepId]);
 
   React.useEffect(() => {
     if (undoStack.length === 0) { setShowUndoBanner(false); return; }
@@ -383,7 +443,10 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // never carries over into one that doesn't have it (or doesn't use
   // regions at all).
   React.useEffect(() => {
-    if (!selectedProcessId) return;
+    // Not until the steps have loaded - before then anyRegionUsed is
+    // always false, which used to wipe a region restored from the last
+    // visit (see readSavedNav) before it could ever be shown.
+    if (!selectedProcessId || loading) return;
     if (anyRegionUsed) {
       const options = flowRegionOptions(stepsInProcessId);
       if (!selectedFlowRegion || !options.includes(selectedFlowRegion)) {
@@ -393,7 +456,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       setSelectedFlowRegion(undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProcessId, anyRegionUsed]);
+  }, [selectedProcessId, anyRegionUsed, loading]);
 
   // The readable name for wherever the header breadcrumb is currently
   // pointing - the breadcrumb itself stays the compact numeric trail
