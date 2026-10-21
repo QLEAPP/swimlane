@@ -1,4 +1,5 @@
 ﻿import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField } from '@fluentui/react';
 import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -96,6 +97,10 @@ export interface ISwimlaneCanvasProps {
   // Draft default has no attribution to show.
   stageSetBy: string | undefined;
   onToggleStage: () => void;
+  // Element in the page's main toolbar row to render "Export to PDF" into
+  // (via a portal) instead of a separate row above the canvas. Null/absent
+  // falls back to that separate row.
+  toolbarSlot?: HTMLElement | null;
 }
 
 interface IEdgeGeometry {
@@ -136,7 +141,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated, onRiskCreated,
   onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onDeleteSteps, onMoveStep, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
-  swimlaneStage, stageSetBy, onToggleStage
+  swimlaneStage, stageSetBy, onToggleStage, toolbarSlot
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
   const svgRef = React.useRef<SVGSVGElement>(null);
@@ -155,7 +160,15 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // filtered views (e.g. drilled into one Process ID with only 1-2 lanes)
   // have none, and reserving the full strip height anyway left a large
   // dead band of empty grid between the header and the first lane row.
-  const [needsHighwayStrip, setNeedsHighwayStrip] = React.useState(true);
+  // How many parallel highway tracks are actually in use (0 = none) -
+  // sizes the strip to fit exactly those (see highwayStripHeight), not
+  // always the full five-track height. Refined 2026-10-20 (user report:
+  // the diagram "looks confusing at times") - one or two arrows crossing
+  // over the top still reserved a ~140px empty band.
+  const [highwayTrackCount, setHighwayTrackCount] = React.useState(5);
+  // True only while exportToPdf is capturing - declared up here (not next
+  // to exportToPdf) because the arrow re-measure effect depends on it.
+  const [exporting, setExporting] = React.useState(false);
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | undefined>(undefined);
   const [draftLabels, setDraftLabels] = React.useState<{ [token: string]: string }>({});
   // Set while the small "Label or delete this dependency" Callout is open
@@ -830,9 +843,9 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     };
 
     const highwayCandidates = candidates.filter(c => c.tier === 'highway');
-    const needsHighway = highwayCandidates.length > 0;
-    if (needsHighway !== needsHighwayStrip) setNeedsHighwayStrip(needsHighway);
     const highwayTracks = assignTracks(highwayCandidates);
+    const trackCount = Math.min(HIGHWAY_TRACK_Y.length, highwayCandidates.length === 0 ? 0 : Math.max(...highwayTracks.values()) + 1);
+    if (trackCount !== highwayTrackCount) setHighwayTrackCount(trackCount);
 
     const localHopGroups = new Map<string, ICandidate[]>();
     candidates.filter(c => c.tier === 'localHop').forEach(c => {
@@ -931,7 +944,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);
-  }, [visibleEdges, orderedSteps, stepsById, needsHighwayStrip, edgeYOffsets]);
+  }, [visibleEdges, orderedSteps, stepsById, highwayTrackCount, edgeYOffsets]);
 
   React.useLayoutEffect(() => {
     // Re-runs after needsHighwayStrip flips and the spacer's own height
@@ -946,10 +959,18 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // trigger (a window resize) happened to force a recompute - confirmed
     // real bug report ("make the arrow make sense and not just display
     // weirdly") once lane reordering became possible.
+    //
+    // `exporting` likewise: the PDF export changes the layout right before
+    // capturing it (adds the title above the grid, drops the "Next step"
+    // column and other editing chrome), so every box moves - without a
+    // re-measure, the printed arrows were drawn where the boxes USED to be,
+    // offset and cutting through shapes (confirmed real user report,
+    // 2026-10-21: "when printing the arrows are going inside out"). This
+    // runs before paint, so exportToPdf's two-rAF wait already covers it.
     measureEdges();
     window.addEventListener('resize', measureEdges);
     return () => window.removeEventListener('resize', measureEdges);
-  }, [measureEdges, needsHighwayStrip, lanes]);
+  }, [measureEdges, highwayTrackCount, lanes, exporting]);
 
   // ctrl/cmd/shift-click toggles multi-selection instead of opening the
   // edit panel - lets several steps be marked for the bulk delete bar
@@ -1063,8 +1084,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     closeEditPopup();
   };
 
-  const [exporting, setExporting] = React.useState(false);
-
   const exportToPdf = async (): Promise<void> => {
     const canvas = canvasRef.current;
     if (!canvas || exporting) return;
@@ -1126,28 +1145,49 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
 
   return (
     <>
-      <div className={styles.canvasToolbar}>
-        <div className={styles.multiSelectBar}>
-          {multiSelectedIds.size > 0 && !isLocked && (
-            <>
-              <span>{multiSelectedIds.size} step{multiSelectedIds.size === 1 ? '' : 's'} selected</span>
-              <DefaultButton text="Clear" onClick={() => setMultiSelectedIds(new Set())} />
-              <DefaultButton
-                text={`Delete ${multiSelectedIds.size}`}
-                iconProps={{ iconName: 'Delete', styles: { root: { color: 'var(--risk-high)' } } }}
-                onClick={handleDeleteMultiSelected}
-              />
-            </>
-          )}
-        </div>
-        <DefaultButton
-          text={exporting ? 'Exporting…' : 'Export to PDF'}
-          iconProps={{ iconName: 'PDF' }}
-          onClick={exportToPdf}
-          disabled={exporting}
-        />
-      </div>
-      <div className={styles.canvas} ref={canvasRef} onDragOver={handleCanvasDragOver}>
+      {/*
+        Export to PDF lives in the page's main toolbar row when the parent
+        gives it a slot there (see toolbarSlot), rather than on a row of
+        its own above the canvas - one less bar to scroll past (user
+        report, 2026-10-20: the top of the page looked cluttered). Portaled
+        rather than lifted up, since exporting needs this component's own
+        canvas ref and state.
+      */}
+      {(() => {
+        const exportButton = (
+          <DefaultButton
+            text={exporting ? 'Exporting…' : 'Export to PDF'}
+            iconProps={{ iconName: 'PDF' }}
+            onClick={exportToPdf}
+            disabled={exporting}
+          />
+        );
+        const showMultiSelectBar = multiSelectedIds.size > 0 && !isLocked;
+        return (
+          <>
+            {toolbarSlot && ReactDOM.createPortal(exportButton, toolbarSlot)}
+            {(showMultiSelectBar || !toolbarSlot) && (
+              <div className={styles.canvasToolbar}>
+                <div className={styles.multiSelectBar}>
+                  {showMultiSelectBar && (
+                    <>
+                      <span>{multiSelectedIds.size} step{multiSelectedIds.size === 1 ? '' : 's'} selected</span>
+                      <DefaultButton text="Clear" onClick={() => setMultiSelectedIds(new Set())} />
+                      <DefaultButton
+                        text={`Delete ${multiSelectedIds.size}`}
+                        iconProps={{ iconName: 'Delete', styles: { root: { color: 'var(--risk-high)' } } }}
+                        onClick={handleDeleteMultiSelected}
+                      />
+                    </>
+                  )}
+                </div>
+                {!toolbarSlot && exportButton}
+              </div>
+            )}
+          </>
+        );
+      })()}
+      <div className={[styles.canvas, isLocked && !exporting ? styles.canvasLocked : ''].filter(Boolean).join(' ')} ref={canvasRef} onDragOver={handleCanvasDragOver}>
       {/*
         Real user report: the exported PDF had no indication anywhere of
         WHICH process it even was. Only shown during the export capture,
@@ -1168,6 +1208,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         stage={swimlaneStage}
         stageSetBy={stageSetBy}
         onToggleStage={onToggleStage}
+        isLocked={isLocked}
+        printing={exporting}
       />
       <svg className={styles.edgeOverlay} ref={svgRef}>
         <defs>
@@ -1321,7 +1363,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               style={{ gridColumn: `span ${group.stepIds.length}` }}
             >
               <span>{label}</span>
-              {onRenameSection && (
+              {onRenameSection && !exporting && (
                 <IconButton
                   iconProps={{ iconName: 'Edit' }}
                   title="Rename this section"
@@ -1338,9 +1380,12 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         )}
 
         <div
-          className={[styles.highwaySpacer, needsHighwayStrip ? '' : styles.highwaySpacerCompact].filter(Boolean).join(' ')}
+          className={styles.highwaySpacer}
           ref={highwaySpacerRef}
-          style={{ gridColumn: '1 / -1' }}
+          // Tracks fan out symmetrically around the strip's centre (see
+          // HIGHWAY_TRACK_Y: 0, -24, +24, -48, +48), so the height only has
+          // to fit the outermost track in use plus corner/arrowhead room.
+          style={{ gridColumn: '1 / -1', height: highwayTrackCount === 0 ? 20 : highwayTrackCount === 1 ? 44 : highwayTrackCount <= 3 ? 92 : 140 }}
         />
 
         {lanes.map((lane, laneIndex) => {

@@ -160,6 +160,15 @@
   color: var(--risk-low);
 }
 
+// Same amber family as the lock banner above the canvas, so the two read
+// as one state - and deliberately louder than Draft/Finalised, since it's
+// the one that actually changes what you can do.
+.stageLocked {
+  background: #fff4ce;
+  color: #8a5a00;
+  border: 1px solid #f2c94c;
+}
+
 .stageBy {
   font-size: var(--fs-xs);
   font-weight: 500;

@@ -19,6 +19,15 @@ export interface IShapeLegendProps {
   // with no attribution rather than a misleading "set by nobody" line.
   stageSetBy: string | undefined;
   onToggleStage: () => void;
+  // While locked the legend stops offering drag-to-add and the stage
+  // toggle, and shows a LOCKED badge next to the stage - user report,
+  // 2026-10-20: a locked swimlane still saying "drag onto the flow to add"
+  // and offering "Mark as Finalised" read as contradicting the lock.
+  isLocked: boolean;
+  // True only while the PDF export is capturing - drops the same editing-
+  // only wording/buttons as isLocked does (but without the LOCKED badge),
+  // since a printed diagram can't be dragged onto or toggled either.
+  printing?: boolean;
 }
 
 // Step type is conveyed by both FORM (mirrors getShapeType in
@@ -26,8 +35,11 @@ export interface IShapeLegendProps {
 // both plain, unconditional lists rather than derived from the data,
 // since a legend should show what every possible shape/color means
 // regardless of which ones happen to appear in the steps on screen.
-const ShapeLegend: React.FC<IShapeLegendProps> = ({ onDragShapeStart, onDragShapeEnd, stage, stageSetBy, onToggleStage }) => {
-  const dragProps = (shapeOverride: string): React.HTMLAttributes<HTMLSpanElement> => ({
+const ShapeLegend: React.FC<IShapeLegendProps> = ({ onDragShapeStart, onDragShapeEnd, stage, stageSetBy, onToggleStage, isLocked, printing = false }) => {
+  const readOnly = isLocked || printing;
+  const itemClass = readOnly ? styles.item : `${styles.item} ${styles.draggableItem}`;
+  const dragProps = (shapeOverride: string, label: string): React.HTMLAttributes<HTMLSpanElement> => readOnly ? {} : ({
+    title: `Drag onto the flow to add ${label}`,
     draggable: true,
     onDragStart: e => {
       e.dataTransfer.effectAllowed = 'copy';
@@ -43,20 +55,20 @@ const ShapeLegend: React.FC<IShapeLegendProps> = ({ onDragShapeStart, onDragShap
     <div className={styles.legend}>
       <div className={styles.row}>
         <div className={styles.group}>
-          <span className={styles.groupLabel}>Step type - drag onto the flow to add</span>
-          <span className={`${styles.item} ${styles.draggableItem}`} title="Drag onto the flow to add a Process step" {...dragProps('Process Step')}>
+          <span className={styles.groupLabel}>{readOnly ? 'Step types' : 'Step type - drag onto the flow to add'}</span>
+          <span className={itemClass} {...dragProps('Process Step', 'a Process step')}>
             <span className={`${styles.swatch} ${styles.process}`} />
             Process step
           </span>
-          <span className={`${styles.item} ${styles.draggableItem}`} title="Drag onto the flow to add a Decision" {...dragProps('Decision')}>
+          <span className={itemClass} {...dragProps('Decision', 'a Decision')}>
             <span className={`${styles.swatch} ${styles.decision}`} />
             Decision
           </span>
-          <span className={`${styles.item} ${styles.draggableItem}`} title="Drag onto the flow to add an Approval" {...dragProps('Approval')}>
+          <span className={itemClass} {...dragProps('Approval', 'an Approval')}>
             <span className={`${styles.swatch} ${styles.approval}`} />
             Approval
           </span>
-          <span className={`${styles.item} ${styles.draggableItem}`} title="Drag onto the flow to add a Document" {...dragProps('Document')}>
+          <span className={itemClass} {...dragProps('Document', 'a Document')}>
             <span className={`${styles.swatch} ${styles.document}`} />
             Document
           </span>
@@ -66,7 +78,7 @@ const ShapeLegend: React.FC<IShapeLegendProps> = ({ onDragShapeStart, onDragShap
           <span className={styles.groupLabel}>Linked risk</span>
           <span className={styles.item}>
             <span className={styles.markerSample}>!</span>
-            Linked risk - click the step for details
+            {printing ? 'Linked risk' : 'Linked risk - click the step for details'}
           </span>
         </div>
       </div>
@@ -78,13 +90,16 @@ const ShapeLegend: React.FC<IShapeLegendProps> = ({ onDragShapeStart, onDragShap
         distinct status for the whole swimlane.
       */}
       <div className={styles.stageRow}>
+        {isLocked && <span className={`${styles.stageBadge} ${styles.stageLocked}`}>&#128274; Locked - view only</span>}
         <span className={`${styles.stageBadge} ${stage === 'Finalised' ? styles.stageFinalised : styles.stageDraft}`}>
           {stage}
         </span>
         {stageSetBy && <span className={styles.stageBy}>set by {stageSetBy}</span>}
-        <button type="button" className={styles.stageToggle} onClick={onToggleStage}>
-          Mark as {stage === 'Draft' ? 'Finalised' : 'Draft'}
-        </button>
+        {!readOnly && (
+          <button type="button" className={styles.stageToggle} onClick={onToggleStage}>
+            Mark as {stage === 'Draft' ? 'Finalised' : 'Draft'}
+          </button>
+        )}
       </div>
     </div>
   );

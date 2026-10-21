@@ -37,6 +37,14 @@
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
+// Locked = view only - an amber frame (same family as the lock banner and
+// the legend's LOCKED badge) so the diagram itself reads as locked, not
+// just a strip of text above it. Not applied during PDF export.
+.canvasLocked {
+  border: 2px solid #f2c94c;
+  box-shadow: 0 0 0 4px rgba(242, 201, 76, 0.18);
+}
+
 .edgeOverlay {
   position: absolute;
   top: 0;
@@ -272,23 +280,14 @@
 // SwimlaneCanvas.tsx, which keeps those confined to their own row's gap
 // instead of piling every detour into this one shared strip. Never
 // render anything in here.
+// Height is set inline from how many highway tracks are actually in use
+// (see highwayTrackCount in SwimlaneCanvas.tsx) - anywhere from a minimal
+// 20px gap when nothing routes over the top, up to 140px for the full
+// +/-48px five-track spread. A fixed 140px left a large empty band
+// between the header and the first lane row whenever only one or two
+// arrows used it.
 .highwaySpacer {
-  // Tall enough to comfortably fit the widest HIGHWAY_TRACK_Y spread
-  // (+/-48px) plus the path's own corner radius, so parallel highway
-  // tracks never crowd the header above or the first lane row below.
-  height: 140px;
   border-bottom: 1px solid var(--border);
-}
-
-// Most filtered views (drilled into one Process ID, especially with only
-// 1-2 lanes) have zero edges that actually need the cross-lane strip -
-// every connection stays inside its own row as a "local hop" instead (see
-// measureEdges in SwimlaneCanvas.tsx). Reserving the full 140px anyway
-// left a large empty band between the header and the first lane row for
-// no reason - SwimlaneCanvas sets needsHighwayStrip false in exactly that
-// case and applies this to shrink it down to a minimal gap instead.
-.highwaySpacerCompact {
-  height: 20px;
 }
 
 .laneCell {

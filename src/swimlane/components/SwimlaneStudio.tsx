@@ -182,6 +182,9 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
 
   const [newStepDraft, setNewStepDraft] = React.useState<IProcessStepFormValue>(emptyStepDraft());
   const [addStepOpen, setAddStepOpen] = React.useState(false);
+  // Callback-ref'd (state, not useRef) so SwimlaneCanvas re-renders once the
+  // toolbar's slot element actually exists - see toolbarSlot there.
+  const [canvasActionsSlot, setCanvasActionsSlot] = React.useState<HTMLDivElement | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [newProcessOpen, setNewProcessOpen] = React.useState(false);
@@ -1849,9 +1852,14 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
               <>
                 <div className={styles.toolbar}>
                   {activeLock && (
-                    <MessageBar messageBarType={MessageBarType.warning} className={styles.lockBanner}>
+                    <MessageBar
+                      messageBarType={MessageBarType.warning}
+                      messageBarIconProps={{ iconName: 'Lock' }}
+                      className={styles.lockBanner}
+                    >
+                      <strong>This swimlane is locked - view only.</strong>{' '}
                       Locked by {activeLock.lockedBy} on {new Date(activeLock.lockedAt).toLocaleString()}
-                      {activeLock.reason ? ` — ${activeLock.reason}` : ''}. Read-only until it's unlocked.
+                      {activeLock.reason ? ` — "${activeLock.reason}"` : ''}. Click <strong>Unlock swimlane</strong> to make changes.
                     </MessageBar>
                   )}
                   <div className={styles.toolbarRow}>
@@ -1923,6 +1931,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                         ]
                       }}
                     />
+                    {/* SwimlaneCanvas portals its "Export to PDF" button in here - see toolbarSlot there. */}
+                    <div ref={setCanvasActionsSlot} style={{ marginLeft: 'auto' }} />
                   </div>
                   {anyRegionUsed && (
                     <FlowRegionTabs
@@ -1974,6 +1984,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   swimlaneStage={currentStage}
                   stageSetBy={activeStatus?.setBy}
                   onToggleStage={handleToggleStage}
+                  toolbarSlot={canvasActionsSlot}
                 />
 
                 {/*
