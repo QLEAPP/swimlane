@@ -651,6 +651,20 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     if (previous) pushUndo({ type: 'edit', previous });
   };
 
+  // Several steps changed by one user action (e.g. moving a step to the
+  // end reconnects the steps that followed it - see moveStepToEnd in
+  // SwimlaneCanvas.tsx), so one Undo puts them all back together.
+  const handleEditSteps = (updated: IProcessStep[]): void => {
+    if (activeLock || updated.length === 0) return;
+    const updatedIds = new Set(updated.map(s => s.id));
+    const previous = steps.filter(s => updatedIds.has(s.id));
+    const stamped = updated.map(withModifiedStamp);
+    const stampedById = new Map(stamped.map(s => [s.id, s]));
+    setSteps(prev => prev.map(s => stampedById.get(s.id) || s));
+    stamped.forEach(step => dataService.updateProcessStep(step).catch((err: Error) => setError(err.message)));
+    pushUndo({ type: 'bulkEdit', previous });
+  };
+
   // While any legacy row-number link still exists, a delete would shift
   // every later row and silently re-point those links at the wrong steps
   // (see stableToken) - so every delete path asks for the one-time
@@ -2034,6 +2048,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   onDeleteStep={handleDeleteStep}
                   onDeleteSteps={handleDeleteSteps}
                   onMoveStep={handleEditStep}
+                  onMoveSteps={handleEditSteps}
                   onCreateStep={handleCreateStepFromShape}
                   onCreateBranchStep={handleCreateBranchStep}
                   autoOpenStepId={autoOpenStepId}

@@ -1,6 +1,6 @@
 ﻿import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField } from '@fluentui/react';
+import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField, MessageBar, MessageBarType } from '@fluentui/react';
 import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { IProcessStep, getShapeType, getProcessId } from '../models/IProcessStep';
@@ -9,7 +9,7 @@ import { IControlStatement } from '../models/IControlStatement';
 import { IEmployee } from '../models/IEmployee';
 import { IDataService } from '../services/IDataService';
 import { SwimlaneStage } from '../models/ISwimlaneStatus';
-import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft, convertLegacyTokens } from '../utils/dependencyResolution';
+import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft, convertLegacyTokens, resolveTokenToStepId, stableToken } from '../utils/dependencyResolution';
 import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder, computeInsertOrderAfter } from '../utils/columns';
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
@@ -65,6 +65,8 @@ export interface ISwimlaneCanvasProps {
   // belongs to a different Process Step ID group (added 2026-09-15 at a
   // real user's request) - see computeDropOrder/dropKeepsDependencyOrder.
   onMoveStep: (updated: IProcessStep) => void;
+  // Saves several steps as ONE undoable change - see moveStepToEnd.
+  onMoveSteps: (updated: IProcessStep[]) => void;
   // Drag-from-legend: dropping a shape from ShapeLegend onto a cell
   // creates a brand new step there - lane and Process Step ID come from
   // whatever cell it landed on (see computeInsertOrderAfter), shape from
@@ -140,7 +142,7 @@ function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
 // through unrelated boxes between them).
 const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   steps, allSteps, swimlaneSteps, edges, riskStatements, controlStatements, processDescription, dataService, onControlLinked, onControlCreated, onRiskCreated,
-  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onDeleteSteps, onMoveStep, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
+  onRenameSection, employees, isLocked, onLabelEdge, onEditStep, onDeleteStep, onDeleteSteps, onMoveStep, onMoveSteps, onCreateStep, onCreateBranchStep, autoOpenStepId, onAutoOpenHandled,
   swimlaneStage, stageSetBy, onToggleStage, toolbarSlot
 }) => {
   const canvasRef = React.useRef<HTMLDivElement>(null);
@@ -169,6 +171,13 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // True only while exportToPdf is capturing - declared up here (not next
   // to exportToPdf) because the arrow re-measure effect depends on it.
   const [exporting, setExporting] = React.useState(false);
+  // What a drop onto the "Next step" column reconnected (see moveStepToEnd).
+  const [dropNotice, setDropNotice] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (!dropNotice) return;
+    const timer = window.setTimeout(() => setDropNotice(undefined), 8000);
+    return () => window.clearTimeout(timer);
+  }, [dropNotice]);
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | undefined>(undefined);
   const [draftLabels, setDraftLabels] = React.useState<{ [token: string]: string }>({});
   // Set while the small "Label or delete this dependency" Callout is open
@@ -1158,6 +1167,61 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const lastStep = orderedSteps[orderedSteps.length - 1];
   const showNextColumn = !!lastStep && !isLocked && !exporting;
 
+  // Existing steps can be dropped on the "Next step" column too, moving
+  // them to the very end (user request, 2026-10-29: "move a step to the
+  // end of the process eg into the next step column") - before, it only
+  // took new shapes from the legend.
+  //
+  // The step is lifted OUT of the chain rather than dragged along with
+  // its arrows: whatever followed it now follows whatever came before it,
+  // and it follows the flow's last step. Refusing the move whenever
+  // anything followed the step (the column-drop rule) meant re-linking
+  // every later step by hand first - "if I need to move step 5 do I have
+  // to move all the following 12 steps" (user, 2026-10-29). All the
+  // changed steps save as one undoable action (onMoveSteps).
+  const draggedStepToEnd = draggingStepId && lastStep && draggingStepId !== lastStep.id
+    ? stepsById.get(draggingStepId)
+    : undefined;
+  const moveStepToEnd = (lane: string): void => {
+    const dragged = draggedStepToEnd;
+    setDraggingStepId(undefined);
+    if (!dragged || !lastStep || isLocked) return;
+    const pointsAtDragged = (token: string): boolean => resolveTokenToStepId(allSteps, token) === dragged.id;
+    const predecessorIds = dependsOnTokensToStepIds(allSteps, dragged.dependsOn);
+    // A Yes/No label on the way INTO the moved step belongs to that
+    // branch, so it passes on to whatever now takes the step's place.
+    const labelFrom = (predecessorId: string): string | undefined => {
+      const token = dragged.dependsOn.find(t => resolveTokenToStepId(allSteps, t) === predecessorId);
+      return token ? dragged.edgeLabels?.[token] : undefined;
+    };
+    const followers = swimlaneSteps.filter(s => s.id !== dragged.id && s.dependsOn.some(pointsAtDragged));
+    const reconnected = followers.map(follower => {
+      const kept = follower.dependsOn.filter(t => !pointsAtDragged(t));
+      const keptIds = new Set(dependsOnTokensToStepIds(allSteps, kept));
+      const added = predecessorIds.filter(id => !keptIds.has(id));
+      const edgeLabels = Object.fromEntries(Object.entries(follower.edgeLabels || {}).filter(([t]) => !pointsAtDragged(t)));
+      added.forEach(id => {
+        const label = labelFrom(id);
+        if (label) edgeLabels[stableToken(id)] = label;
+      });
+      return { ...follower, dependsOn: [...kept, ...added.map(stableToken)], edgeLabels };
+    });
+    const newOrder = computeDropOrder(allSteps, dragged.id, lastStep.id, false);
+    const moved: IProcessStep = {
+      ...dragged,
+      processStepId: lastStep.processStepId,
+      processStepName: lastStep.processStepName,
+      responsibleJobTitle: lane === 'Unassigned' ? '' : lane,
+      manualOrder: newOrder !== undefined ? newOrder : dragged.manualOrder,
+      dependsOn: [stableToken(lastStep.id)],
+      edgeLabels: {}
+    };
+    onMoveSteps([moved, ...reconnected]);
+    setDropNotice(followers.length > 0
+      ? `Moved "${dragged.actionDescription}" to the end, after "${lastStep.actionDescription}". ${followers.map(s => `"${s.actionDescription}"`).join(', ')} now ${followers.length === 1 ? 'follows' : 'follow'} the step${predecessorIds.length === 1 ? '' : 's'} that came before it. Use Undo to put it back.`
+      : `Moved "${dragged.actionDescription}" to the end, after "${lastStep.actionDescription}". Use Undo to put it back.`);
+  };
+
   return (
     <>
       {/*
@@ -1202,6 +1266,11 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
           </>
         );
       })()}
+      {dropNotice && (
+        <MessageBar messageBarType={MessageBarType.info} onDismiss={() => setDropNotice(undefined)} dismissButtonAriaLabel="Close">
+          {dropNotice}
+        </MessageBar>
+      )}
       <div className={[styles.canvas, isLocked && !exporting ? styles.canvasLocked : ''].filter(Boolean).join(' ')} ref={canvasRef} onDragOver={handleCanvasDragOver}>
       {/*
         Real user report: the exported PDF had no indication anywhere of
@@ -1506,19 +1575,23 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               <div
                 className={[
                   styles.laneCell,
-                  draggingNewShape ? styles.validDropTarget : '',
+                  draggingNewShape || draggedStepToEnd ? styles.validDropTarget : '',
                   dragOverCellId === `${lane}-next` ? styles.dragOver : ''
                 ].filter(Boolean).join(' ')}
                 onDragOver={e => {
-                  if (!draggingNewShape) return;
+                  // Accepted even when the dependency rule will refuse it -
+                  // moveStepToEnd then explains why instead of a silent
+                  // "not allowed" cursor.
+                  if (!draggingNewShape && !draggedStepToEnd) return;
                   e.preventDefault();
-                  e.dataTransfer.dropEffect = 'copy';
+                  e.dataTransfer.dropEffect = draggingNewShape ? 'copy' : 'move';
                   setDragOverCellId(`${lane}-next`);
                 }}
                 onDragLeave={() => setDragOverCellId(prev => (prev === `${lane}-next` ? undefined : prev))}
                 onDrop={e => {
                   e.preventDefault();
                   setDragOverCellId(undefined);
+                  if (draggedStepToEnd) { moveStepToEnd(lane); return; }
                   const shapeOverride = draggingNewShape;
                   setDraggingNewShape(undefined);
                   if (!shapeOverride || isLocked) return;
