@@ -1226,14 +1226,19 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         setSteps(prev => [...prev, created]);
         setNewStepDraft(emptyStepDraft());
         setSaving(false);
+        // Closes after every add, not just for a Decision - staying open
+        // with a freshly blanked form read as "nothing happened", so the
+        // same step got added again and again (confirmed real user report,
+        // 2026-10-29: "the page would just go back to asking me to add
+        // another step instead of closing so I thought there was no step
+        // added"). Seeing the panel close and the new box appear is the
+        // confirmation.
+        setAddStepOpen(false);
         // A new Decision opens its edit panel straight away so its Yes/No
         // Branches section is right there (user request, 2026-10-20 -
         // "once I said the step was a decision I couldn't see the yes and
         // no branches") instead of having to go find it on the canvas.
-        // The add-step panel closes for it, so the Decision's edit panel
-        // isn't opening half-hidden behind it.
         if (created.shapeOverride === 'Decision') {
-          setAddStepOpen(false);
           setAutoOpenStepId(created.id);
         }
       })
@@ -1991,8 +1996,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   A side panel opened from the toolbar's "+ Add a step", not a
                   card permanently under the canvas (user request, 2026-10-20 -
                   "it just becomes cumbersome and reduces the screen"). Non-
-                  blocking, so the flow stays visible and usable beside it, and
-                  it stays open after adding so several steps can go in a row.
+                  blocking, so the flow stays visible and usable beside it. It
+                  closes after each add (see handleAddStep for why).
                 */}
                 {!activeLock && (
                 <Panel
