@@ -755,12 +755,22 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // The overlay covers the full grid - which can be wider than the layer
     // (it overflows it horizontally) - not just the visible, scrolled
     // part, so no edge falls outside the SVG's own box and gets clipped.
-    // Measured from the grid's own rect: the SVG is absolutely positioned
-    // and never feeds back into it (the old canvas.scrollWidth sizing had
+    // Measured from the grid's cells: the SVG is absolutely positioned
+    // and never feeds back into them (the old canvas.scrollWidth sizing had
     // to collapse the SVG first to avoid exactly that).
-    const gridRect = gridRef.current?.getBoundingClientRect();
-    const contentWidth = Math.max(layerRect.width, gridRect ? gridRect.right - layerRect.left : 0) / z;
-    const contentHeight = Math.max(layerRect.height, gridRect ? gridRect.bottom - layerRect.top : 0) / z;
+    // The grid's OWN rect is no good here: it's only as wide as the layer,
+    // its columns overflow it - a 40-step swimlane got every arrow past the
+    // first screen-width clipped (confirmed real user report, 2026-10-29).
+    // So take the furthest edge of its actual cells instead.
+    let contentRight = layerRect.right;
+    let contentBottom = layerRect.bottom;
+    for (const cell of Array.from(gridRef.current?.children ?? [])) {
+      const r = cell.getBoundingClientRect();
+      if (r.right > contentRight) contentRight = r.right;
+      if (r.bottom > contentBottom) contentBottom = r.bottom;
+    }
+    const contentWidth = (contentRight - layerRect.left) / z;
+    const contentHeight = (contentBottom - layerRect.top) / z;
     if (svgRef.current) {
       svgRef.current.style.width = `${contentWidth}px`;
       svgRef.current.style.height = `${contentHeight}px`;
