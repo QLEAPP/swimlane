@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ComboBox, IComboBoxOption } from '@fluentui/react';
+import { ComboBox, IComboBox, IComboBoxOption } from '@fluentui/react';
 import { IEmployee, GUARANTEED_JOB_TITLES } from '../models/IEmployee';
 
 export interface IEmployeePickerProps {
@@ -21,10 +21,28 @@ export interface IEmployeePickerProps {
 // which read as arbitrary/scattered rather than useful. Alphabetical is
 // the one order every user can predict without knowing the data.
 const EmployeePicker: React.FC<IEmployeePickerProps> = ({ employees, value, onChange }) => {
-  const options: IComboBoxOption[] = React.useMemo(() => {
+  const comboRef = React.useRef<IComboBox>(null);
+  const allOptions: IComboBoxOption[] = React.useMemo(() => {
     const distinctTitles = Array.from(new Set([...GUARANTEED_JOB_TITLES, ...employees.map(e => e.jobTitle)]));
     return distinctTitles.sort((a, b) => a.localeCompare(b)).map(jobTitle => ({ key: jobTitle, text: jobTitle }));
   }, [employees]);
+
+  // What's typed right now, or undefined when not searching. Matches
+  // ANYWHERE in the title, not just its start - Fluent's own autoComplete
+  // only matched prefixes, so typing "EPC" found nothing for "ASPI
+  // Procurement SA - EPC Contractor", and on blur it silently filled in
+  // whichever title merely STARTED with the typed text (typing
+  // "Procurement" and clicking away saved "Procurement Manager") -
+  // confirmed real user report, 2026-10-29. Nothing is committed now
+  // unless an option is actually picked.
+  const [query, setQuery] = React.useState<string | undefined>(undefined);
+  const matches = React.useMemo(() => {
+    const q = query?.trim().toLowerCase();
+    return q ? allOptions.filter(o => o.text.toLowerCase().includes(q)) : allOptions;
+  }, [allOptions, query]);
+  const options: IComboBoxOption[] = matches.length > 0
+    ? matches
+    : [{ key: '__noMatch', text: 'No matching job title', disabled: true }];
 
   return (
     <ComboBox
@@ -56,12 +74,22 @@ const EmployeePicker: React.FC<IEmployeePickerProps> = ({ employees, value, onCh
       // REAL option's key, never freeformValue, so a job title that isn't
       // in the Employees list still can't be saved - allowFreeform only
       // unlocks live typing/filtering, not arbitrary freeform values.
-      text={value}
+      componentRef={comboRef}
+      text={query ?? value}
       options={options}
-      autoComplete="on"
+      autoComplete="off"
       allowFreeform
+      onInputValueChange={typed => {
+        setQuery(typed);
+        comboRef.current?.focus(true);
+      }}
+      onMenuDismissed={() => setQuery(undefined)}
       onChange={(_e, option) => {
-        if (option) onChange(String(option.key));
+        // Enter on typed text with exactly one match takes that match -
+        // the one case where what's meant is unambiguous.
+        const picked = option || (matches.length === 1 ? matches[0] : undefined);
+        setQuery(undefined);
+        if (picked && !picked.disabled) onChange(String(picked.key));
       }}
     />
   );
