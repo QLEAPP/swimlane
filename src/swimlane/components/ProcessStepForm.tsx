@@ -119,11 +119,15 @@ export interface IProcessStepFormProps {
   // Off for NewProcessModal, which asks for a brand-new Process Step ID
   // itself instead of picking an existing section.
   showSection?: boolean;
+  // Rendered straight under Section - "Add a step" puts its Position
+  // picker here, since where in the section only makes sense next to
+  // which section.
+  afterSection?: React.ReactNode;
 }
 
 const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
   value, onChange, employees, dependsOnOptions, dependsOnSteps, riskStatements, controlStatements, processStepId, processDescription,
-  dataService, onControlLinked, onControlCreated, onRiskCreated, showSection
+  dataService, onControlLinked, onControlCreated, onRiskCreated, showSection, afterSection
 }) => {
   const set = <K extends keyof IProcessStepFormValue>(key: K, v: IProcessStepFormValue[K]): void => {
     onChange({ ...value, [key]: v });
@@ -192,6 +196,7 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
           onChange={(_e, option) => option && set('sectionId', String(option.key))}
         />
       )}
+      {afterSection}
       <Checkbox
         label="This step depends on nothing"
         // Derived from the selection itself rather than tracked as its

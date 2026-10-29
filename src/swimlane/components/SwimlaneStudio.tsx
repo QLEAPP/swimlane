@@ -1,7 +1,7 @@
 ﻿import * as React from 'react';
 import {
   Spinner, MessageBar, MessageBarType, MessageBarButton, DefaultButton, PrimaryButton, IconButton, Pivot, PivotItem,
-  Dialog, DialogType, DialogFooter, TextField, Panel, PanelType
+  Dialog, DialogType, DialogFooter, TextField, Panel, PanelType, Dropdown, IDropdownOption
 } from '@fluentui/react';
 import styles from './SwimlaneStudio.module.scss';
 import type { ISwimlaneStudioProps } from './ISwimlaneStudioProps';
@@ -18,7 +18,7 @@ import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
 import {
   resolveDependencyEdges, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, findStepsNeedingTokenConversion, remapStableTokens
 } from '../utils/dependencyResolution';
-import { computeInsertOrderBefore, computeInsertOrderAfter, compareProcessStepIds } from '../utils/columns';
+import { computeInsertOrderBefore, computeInsertOrderAfter, compareProcessStepIds, orderStepsForTimeline } from '../utils/columns';
 import { buildExportCsv, downloadTextFile } from '../utils/csvExport';
 import { ADMIN_UNLOCK_PASSWORD } from '../adminConfig';
 import {
@@ -129,6 +129,8 @@ const MAX_UNDO_STACK = 20;
 function describeError(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
 }
+
+const START_POSITION = '__start';
 
 const emptyStepDraft = (): IProcessStepFormValue => ({
   action: '',
@@ -588,6 +590,23 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       || '',
     [drilledDownStepId, stepsInRegion]
   );
+  // Where in its section a step from "Add a step" goes: '' = at the end
+  // (the default), START_POSITION = first, otherwise the id of the step it
+  // goes straight after. Added 2026-10-29 at the user's request ("make
+  // sure I am able to add steps in the middle of a process ... not just
+  // at the end") - before, the form could only append, and the middle
+  // was reachable only by dragging a shape from the legend onto a column.
+  const [newStepAfterId, setNewStepAfterId] = React.useState('');
+  const addSectionId = newStepDraft.sectionId || defaultAddSectionId;
+  const addSectionSteps = React.useMemo(
+    () => orderStepsForTimeline(stepsInRegion.filter(s => s.processStepId === addSectionId)),
+    [stepsInRegion, addSectionId]
+  );
+  const addPositionOptions: IDropdownOption[] = React.useMemo(() => [
+    { key: '', text: 'At the end' },
+    ...(addSectionSteps.length > 0 ? [{ key: START_POSITION, text: 'At the start' }] : []),
+    ...addSectionSteps.map((s, i) => ({ key: s.id, text: `After ${i + 1}. ${s.actionDescription || '(no description)'}` }))
+  ], [addSectionSteps]);
 
   const visibleSteps = React.useMemo(
     () => drilledDownStepId ? stepsInRegion.filter(s => s.processStepId === drilledDownStepId) : stepsInRegion,
@@ -1200,6 +1219,19 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     const pickedSectionStep = chosenSectionId
       ? stepsInRegion.find(s => s.processStepId === chosenSectionId)
       : undefined;
+    const targetSectionId = pickedSectionStep?.processStepId || drilledDownStepId || lastSectionReferenceStep?.processStepId || selectedProcessId;
+    // Position (see newStepAfterId) - same midpoint ordering a shape
+    // dropped onto a column gets (handleCreateStepFromShape). Left unset
+    // for "At the end", which is how adding has always appended.
+    const targetSectionSteps = orderStepsForTimeline(stepsInRegion.filter(s => s.processStepId === targetSectionId));
+    const afterIdx = targetSectionSteps.findIndex(s => s.id === newStepAfterId);
+    const manualOrder = newStepAfterId === START_POSITION && targetSectionSteps.length > 0
+      ? computeInsertOrderBefore(steps, targetSectionSteps[0].id)
+      : afterIdx === -1
+        ? undefined
+        : afterIdx + 1 < targetSectionSteps.length
+          ? computeInsertOrderBefore(steps, targetSectionSteps[afterIdx + 1].id)
+          : computeInsertOrderAfter(steps, targetSectionSteps[afterIdx].id);
     const { dependsOnStepIds, edgeLabelsByDependsOnId, sectionId: _sectionId, ...fields } = newStepDraft;
     setSaving(true);
     dataService.addProcessStep({
@@ -1226,7 +1258,8 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       // actually belonged with. Only actually falls through to the bare
       // selectedProcessId for a genuinely brand-new, currently-empty
       // Process ID, where there's no real section yet to continue anyway.
-      processStepId: pickedSectionStep?.processStepId || drilledDownStepId || lastSectionReferenceStep?.processStepId || selectedProcessId,
+      processStepId: targetSectionId,
+      manualOrder,
       // Must match whichever section processStepId above actually landed
       // in - using regionReferenceStep/anyReferenceStep's name here
       // instead (a DIFFERENT, earlier section) would mislabel the new
@@ -1243,6 +1276,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       .then(created => {
         setSteps(prev => [...prev, created]);
         setNewStepDraft(emptyStepDraft());
+        setNewStepAfterId('');
         setSaving(false);
         // Closes after every add, not just for a Decision - staying open
         // with a freshly blanked form read as "nothing happened", so the
@@ -2040,6 +2074,14 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                         value={newStepDraft.sectionId ? newStepDraft : { ...newStepDraft, sectionId: defaultAddSectionId }}
                         onChange={setNewStepDraft}
                         showSection
+                        afterSection={addSectionSteps.length > 0 && (
+                          <Dropdown
+                            label="Position"
+                            selectedKey={addPositionOptions.some(o => o.key === newStepAfterId) ? newStepAfterId : ''}
+                            options={addPositionOptions}
+                            onChange={(_e, option) => option && setNewStepAfterId(String(option.key))}
+                          />
+                        )}
                         employees={employees}
                         dependsOnOptions={addStepDependsOnOptions}
                         dependsOnSteps={stepsInRegion}
