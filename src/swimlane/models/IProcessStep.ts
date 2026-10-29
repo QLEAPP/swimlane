@@ -144,6 +144,10 @@ export function getProcessId(processStepId: string): string {
 // a real, taggable region in its own right.
 export const KNOWN_FLOW_REGIONS = ['UK', 'US', 'SA', 'Global'];
 
+// The region "tab" for steps saved with no region at all - the stored
+// value itself (''), same as locks/comments/statuses already use for them.
+export const NO_REGION = '';
+
 // The ordered list FlowRegionTabs shows for a given Process ID's steps -
 // every known region plus any real, non-standard tag actually found in
 // the data. Shared with SwimlaneStudio (not just computed locally inside
