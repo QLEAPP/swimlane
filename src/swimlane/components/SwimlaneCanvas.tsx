@@ -125,6 +125,14 @@ interface IEdgeGeometry {
 // scannable without altering the underlying data - falls back to the raw
 // string untouched for values that don't follow the pattern (e.g. a
 // multi-party lane like "Vendor, Business, Finance Manager").
+const ZOOM_LEVELS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+
+// The far end of an arrow that leaves the current view (see offViewLinks).
+interface IOffViewLink {
+  other: IProcessStep;
+  label?: string;
+}
+
 function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
   const parts = raw.split(' / ').map(p => p.trim());
   if (parts.length !== 3) return { primary: raw };
@@ -148,8 +156,13 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const canvasRef = React.useRef<HTMLDivElement>(null);
   const svgRef = React.useRef<SVGSVGElement>(null);
   const highwaySpacerRef = React.useRef<HTMLDivElement>(null);
+  const gridRef = React.useRef<HTMLDivElement>(null);
   const nodeRefs = React.useRef(new Map<string, HTMLDivElement>());
   const [edgeGeometry, setEdgeGeometry] = React.useState<IEdgeGeometry[]>([]);
+  // Which sides of each box drawn arrows attach to - off-view link tags
+  // go on a side that's free (see offViewSide), so an arrow leaving the
+  // box never runs through one.
+  const [usedSides, setUsedSides] = React.useState<Map<string, Set<Side>>>(new Map());
   // Ad-hoc multi-selection for "drop more than one step in a row" - kept
   // entirely separate from selectedNodeId (which means "this step's edit
   // panel is open"); a plain click still opens one step to edit as before,
@@ -171,6 +184,28 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // True only while exportToPdf is capturing - declared up here (not next
   // to exportToPdf) because the arrow re-measure effect depends on it.
   const [exporting, setExporting] = React.useState(false);
+  // Zoom in/out on the diagram (user request, 2026-10-29). Applied with
+  // CSS `zoom` on a layer wrapping everything inside the canvas, so the
+  // scroll area grows and shrinks with it (a transform would leave the
+  // scroll size at 100%). A per-viewer view preference, remembered in
+  // localStorage like the lane order. Always 100% while exporting, so a
+  // PDF never depends on how zoomed in whoever exported it happened to be.
+  const [zoom, setZoom] = React.useState<number>(() => {
+    try {
+      const saved = Number(window.localStorage.getItem('swimlane-zoom'));
+      return ZOOM_LEVELS.includes(saved) ? saved : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const effectiveZoom = exporting ? 1 : zoom;
+  const zoomRef = React.useRef(effectiveZoom);
+  zoomRef.current = effectiveZoom;
+  const zoomLayerRef = React.useRef<HTMLDivElement>(null);
+  const changeZoom = (next: number): void => {
+    setZoom(next);
+    try { window.localStorage.setItem('swimlane-zoom', String(next)); } catch { /* best-effort, like the other view preferences */ }
+  };
   // What a drop onto the "Next step" column reconnected (see moveStepToEnd).
   const [dropNotice, setDropNotice] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
@@ -520,9 +555,25 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   // above, and for the same reason: this is a display preference (where
   // a line bends), not real process data, and there's no confirmed real
   // SharePoint column to hold it in.
-  const [edgeYOffsets, setEdgeYOffsets] = React.useState<{ [edgeKey: string]: number }>({});
+  //
+  // Reworked 2026-10-29 (user report: arrows should "remain as I put them
+  // and not keep moving after edit"). Entries are now keyed by the two
+  // steps the arrow joins (offsetKey), not by DependsOn token - saving a
+  // step rewrites its legacy row-number tokens to stable ones, which
+  // changed the key and silently dropped the placement. And the Y is now
+  // stored relative to the arrow's source box ({ rel }), not as an
+  // absolute page Y, so it moves WITH the box when an edit resizes a strip
+  // or row above it instead of landing somewhere else (or inside a box,
+  // where customYIsSafe throws it away). Plain-number entries under the
+  // old token key are pre-rework absolute Ys - still honoured until that
+  // arrow is next dragged, which rewrites it in the new form.
+  const [edgeYOffsets, setEdgeYOffsets] = React.useState<{ [edgeKey: string]: number | { rel: number } }>({});
   const [draggingEdgeKey, setDraggingEdgeKey] = React.useState<string | undefined>(undefined);
-  const edgeDragStartRef = React.useRef<{ startClientY: number; startOffset: number } | undefined>(undefined);
+  const edgeDragStartRef = React.useRef<{ startClientY: number; startOffset: number; edge: IResolvedEdge } | undefined>(undefined);
+  // Each step box's top as last measured - the anchor { rel } is stored
+  // against (see measureEdges).
+  const nodeTopsRef = React.useRef(new Map<string, number>());
+  const offsetKey = (edge: IResolvedEdge): string => `${edge.fromRowId}->${edge.toRowId}`;
 
   React.useEffect(() => {
     if (!processIdForLanes) { setEdgeYOffsets({}); return; }
@@ -538,21 +589,24 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     if (isLocked) return;
     e.preventDefault();
     e.stopPropagation();
-    const key = draftKey(edge);
     // From where the bend is actually DRAWN, not the stored value - a
     // stored value can sit past the bottom of the grid (see maxBendY,
     // which clamps it on screen), and starting from that hidden value made
     // dragging back up appear to do nothing until the pointer caught up.
-    edgeDragStartRef.current = { startClientY: e.clientY, startOffset: currentY };
-    setDraggingEdgeKey(key);
+    edgeDragStartRef.current = { startClientY: e.clientY, startOffset: currentY, edge };
+    setDraggingEdgeKey(offsetKey(edge));
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
   const handleEdgeHandlePointerMove = (e: React.PointerEvent): void => {
     if (!draggingEdgeKey || !edgeDragStartRef.current) return;
-    const dy = e.clientY - edgeDragStartRef.current.startClientY;
-    const newOffset = edgeDragStartRef.current.startOffset + dy;
-    setEdgeYOffsets(prev => ({ ...prev, [draggingEdgeKey]: newOffset }));
+    const { startClientY, startOffset, edge } = edgeDragStartRef.current;
+    const newY = startOffset + (e.clientY - startClientY) / zoomRef.current;
+    const fromTop = nodeTopsRef.current.get(edge.fromRowId) ?? 0;
+    setEdgeYOffsets(prev => {
+      const { [draftKey(edge)]: _legacy, ...rest } = prev;
+      return { ...rest, [draggingEdgeKey]: { rel: newY - fromTop } };
+    });
   };
 
   const handleEdgeHandlePointerUp = (): void => {
@@ -642,15 +696,47 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     [edges, stepsById]
   );
 
+  // Arrows with only ONE end on screen - visibleEdges drops them, so a
+  // single section's first step looked like it came from nowhere and its
+  // last led nowhere, on screen and in the PDF alike. Shown instead as
+  // small "From 9.6.1.1 · ..." / "To 9.6.1.3 · ..." tags on the box
+  // (off-page connectors) - user request, 2026-10-29: "when printing a
+  // specific section ... show where the arrows start from".
+  const offViewLinks = React.useMemo(() => {
+    const allById = new Map(allSteps.map(s => [s.id, s]));
+    const incoming = new Map<string, IOffViewLink[]>();
+    const outgoing = new Map<string, IOffViewLink[]>();
+    edges.forEach(e => {
+      const fromShown = stepsById.has(e.fromRowId);
+      if (fromShown === stepsById.has(e.toRowId)) return;
+      const other = allById.get(fromShown ? e.toRowId : e.fromRowId);
+      if (!other) return;
+      const map = fromShown ? outgoing : incoming;
+      const key = fromShown ? e.fromRowId : e.toRowId;
+      map.set(key, [...(map.get(key) || []), { other, label: e.label }]);
+    });
+    return { incoming, outgoing };
+  }, [edges, stepsById, allSteps]);
+
   const connectionsForSelectedNode = React.useMemo(
     () => selectedNodeId ? visibleEdges.filter(e => e.fromRowId === selectedNodeId) : [],
     [visibleEdges, selectedNodeId]
   );
 
   const measureEdges = React.useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const canvasRect = canvas.getBoundingClientRect();
+    const layer = zoomLayerRef.current;
+    if (!layer) return;
+    // Everything is measured relative to the zoom layer (see zoom), in its
+    // own unzoomed CSS pixels - getBoundingClientRect reports ZOOMED screen
+    // pixels, while the SVG inside the layer draws in unzoomed ones. The
+    // layer's own rect already moves with the canvas's scroll, so no
+    // scroll add-back is needed either.
+    const z = zoomRef.current;
+    const layerRect = layer.getBoundingClientRect();
+    const measure = (domRect: DOMRect): IRect => {
+      const r = rectFromDomRect(domRect, layerRect, 0, 0);
+      return { left: r.left / z, top: r.top / z, right: r.right / z, bottom: r.bottom / z, cx: r.cx / z, cy: r.cy / z };
+    };
     // Parallel tracks inside the reserved cross-lane strip. Two
     // independent edges that both genuinely need it can still land on
     // overlapping X-ranges - give them real separation so they don't read
@@ -666,44 +752,37 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     // shape (the 140px approval circle).
     const LOCAL_HOP_CLEARANCE = 22;
 
-    // The overlay's width/height:100% would otherwise only cover the
-    // CANVAS's visible viewport (its CSS containing-block size), not the
-    // full scrollable grid - since path coordinates are computed in
-    // full-content space (see rectFromDomRect's scroll offset add-back),
-    // any edge past the initially-visible width/height would silently
-    // fall outside the SVG's own box and get clipped by its default
-    // overflow:hidden. Force it to the real scrollable size instead.
-    //
-    // The SVG is itself one of the things contributing to canvas.scrollWidth
-    // (it's a real child, not removed from flow), so reading that value
-    // without resetting the SVG first picks up ITS OWN previous size -
-    // switching from a wide filtered view (e.g. "All") to a narrower one
-    // (e.g. a single Process ID) would otherwise never shrink back down,
-    // stuck forever at the widest size ever rendered this session. Collapse
-    // it first so the measurement reflects only the grid's real content.
+    // The overlay covers the full grid - which can be wider than the layer
+    // (it overflows it horizontally) - not just the visible, scrolled
+    // part, so no edge falls outside the SVG's own box and gets clipped.
+    // Measured from the grid's own rect: the SVG is absolutely positioned
+    // and never feeds back into it (the old canvas.scrollWidth sizing had
+    // to collapse the SVG first to avoid exactly that).
+    const gridRect = gridRef.current?.getBoundingClientRect();
+    const contentWidth = Math.max(layerRect.width, gridRect ? gridRect.right - layerRect.left : 0) / z;
+    const contentHeight = Math.max(layerRect.height, gridRect ? gridRect.bottom - layerRect.top : 0) / z;
     if (svgRef.current) {
-      svgRef.current.style.width = '0px';
-      svgRef.current.style.height = '0px';
-      svgRef.current.style.width = `${canvas.scrollWidth}px`;
-      svgRef.current.style.height = `${canvas.scrollHeight}px`;
+      svgRef.current.style.width = `${contentWidth}px`;
+      svgRef.current.style.height = `${contentHeight}px`;
     }
     // Lowest Y an arrow's bend may sit at and still be drawn - anything
     // past the grid's own bottom falls outside the SVG and simply vanishes
     // (confirmed real user report, 2026-10-20: "arrows that go down at the
     // bottom that we can't even see"). Manually-dragged bends get clamped
     // to this, including ones already saved from before this fix.
-    const maxBendY = canvas.scrollHeight - 14;
+    const maxBendY = contentHeight - 14;
 
     const rectById = new Map<string, IRect>();
     orderedSteps.forEach(step => {
       const el = nodeRefs.current.get(step.id);
       if (!el) return;
-      rectById.set(step.id, rectFromDomRect(el.getBoundingClientRect(), canvasRect, canvas.scrollLeft, canvas.scrollTop));
+      rectById.set(step.id, measure(el.getBoundingClientRect()));
     });
+    nodeTopsRef.current = new Map(Array.from(rectById, ([id, rect]) => [id, rect.top]));
     const allRects = Array.from(rectById.entries());
 
     const highwayBaseY = highwaySpacerRef.current
-      ? rectFromDomRect(highwaySpacerRef.current.getBoundingClientRect(), canvasRect, canvas.scrollLeft, canvas.scrollTop).cy
+      ? measure(highwaySpacerRef.current.getBoundingClientRect()).cy
       : 20;
 
     // Topmost edge of each lane's tallest rendered box (a diamond sits
@@ -889,7 +968,10 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     const bendY = new Map<IResolvedEdge, number>();
     candidates.forEach(c => {
       if (c.tier === 'direct') return;
-      const customY = edgeYOffsets[draftKey(c.edge)];
+      // Same keys as offsetKey / draftKey - spelled out here so this
+      // callback only depends on edgeYOffsets itself.
+      const stored = edgeYOffsets[`${c.edge.fromRowId}->${c.edge.toRowId}`] ?? edgeYOffsets[`${c.edge.toRowId}::${c.edge.token}`];
+      const customY = stored === undefined ? undefined : typeof stored === 'number' ? stored : c.a.top + stored.rel;
       const clampedY = customY === undefined ? undefined : Math.min(customY, maxBendY);
       if (clampedY !== undefined && customYIsSafe(c.a.cx, c.b.cx, clampedY)) {
         bendY.set(c.edge, clampedY);
@@ -953,6 +1035,12 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);
+    const sides = new Map<string, Set<Side>>();
+    attachments.forEach(att => {
+      const nodeId = att.role === 'from' ? att.edge.fromRowId : att.edge.toRowId;
+      sides.set(nodeId, (sides.get(nodeId) || new Set<Side>()).add(att.side));
+    });
+    setUsedSides(sides);
   }, [visibleEdges, orderedSteps, stepsById, highwayTrackCount, edgeYOffsets]);
 
   React.useLayoutEffect(() => {
@@ -979,7 +1067,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     measureEdges();
     window.addEventListener('resize', measureEdges);
     return () => window.removeEventListener('resize', measureEdges);
-  }, [measureEdges, highwayTrackCount, lanes, exporting]);
+  }, [measureEdges, highwayTrackCount, lanes, exporting, effectiveZoom]);
 
   // ctrl/cmd/shift-click toggles multi-selection instead of opening the
   // edit panel - lets several steps be marked for the bulk delete bar
@@ -1235,18 +1323,43 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         canvas ref and state.
       */}
       {(() => {
-        const exportButton = (
-          <DefaultButton
-            text={exporting ? 'Exporting…' : 'Export to PDF'}
-            iconProps={{ iconName: 'PDF' }}
-            onClick={exportToPdf}
-            disabled={exporting}
-          />
+        const zoomIndex = ZOOM_LEVELS.indexOf(zoom);
+        const toolbarButtons = (
+          <>
+            <div className={styles.zoomControls} role="group" aria-label="Zoom">
+              <IconButton
+                iconProps={{ iconName: 'ZoomOut' }}
+                title="Zoom out"
+                ariaLabel="Zoom out"
+                disabled={zoomIndex <= 0}
+                onClick={() => changeZoom(ZOOM_LEVELS[zoomIndex - 1])}
+              />
+              <DefaultButton
+                className={styles.zoomReset}
+                text={`${Math.round(zoom * 100)}%`}
+                title="Reset zoom to 100%"
+                onClick={() => changeZoom(1)}
+              />
+              <IconButton
+                iconProps={{ iconName: 'ZoomIn' }}
+                title="Zoom in"
+                ariaLabel="Zoom in"
+                disabled={zoomIndex >= ZOOM_LEVELS.length - 1}
+                onClick={() => changeZoom(ZOOM_LEVELS[zoomIndex + 1])}
+              />
+            </div>
+            <DefaultButton
+              text={exporting ? 'Exporting…' : 'Export to PDF'}
+              iconProps={{ iconName: 'PDF' }}
+              onClick={exportToPdf}
+              disabled={exporting}
+            />
+          </>
         );
         const showMultiSelectBar = multiSelectedIds.size > 0 && !isLocked;
         return (
           <>
-            {toolbarSlot && ReactDOM.createPortal(exportButton, toolbarSlot)}
+            {toolbarSlot && ReactDOM.createPortal(toolbarButtons, toolbarSlot)}
             {(showMultiSelectBar || !toolbarSlot) && (
               <div className={styles.canvasToolbar}>
                 <div className={styles.multiSelectBar}>
@@ -1262,7 +1375,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                     </>
                   )}
                 </div>
-                {!toolbarSlot && exportButton}
+                {!toolbarSlot && toolbarButtons}
               </div>
             )}
           </>
@@ -1274,6 +1387,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         </MessageBar>
       )}
       <div className={[styles.canvas, isLocked && !exporting ? styles.canvasLocked : ''].filter(Boolean).join(' ')} ref={canvasRef} onDragOver={handleCanvasDragOver}>
+      <div className={styles.zoomLayer} ref={zoomLayerRef} style={{ zoom: effectiveZoom }}>
       {/*
         Real user report: the exported PDF had no indication anywhere of
         WHICH process it even was. Only shown during the export capture,
@@ -1430,7 +1544,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
         content needs, not to fill leftover space - a short flow now just
         leaves empty canvas to the right instead of stretching.
       */}
-      <div className={styles.grid} style={{ gridTemplateColumns: `170px repeat(${orderedSteps.length + (showNextColumn ? 1 : 0)}, minmax(170px, 260px))` }}>
+      <div className={styles.grid} ref={gridRef} style={{ gridTemplateColumns: `170px repeat(${orderedSteps.length + (showNextColumn ? 1 : 0)}, minmax(170px, 260px))` }}>
         <div className={styles.corner} />
         {columnGroups.map(group => {
           // Was ID-only whenever viewing "All" (i.e. exactly where a name
@@ -1556,6 +1670,26 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 // during the export capture, never in normal editing.
                 !belongsToLane && exporting ? styles.emptyCellExport : ''
               ].filter(Boolean).join(' ');
+              // Incoming tags prefer the top, outgoing the bottom, unless a
+              // drawn arrow already uses that side - then the other one.
+              const used = usedSides.get(step.id) || new Set<Side>();
+              const inAbove = !used.has('top') || used.has('bottom');
+              const outBelow = !used.has('bottom') || used.has('top');
+              const offViewTags: { above: React.ReactNode[]; below: React.ReactNode[] } = { above: [], below: [] };
+              (offViewLinks.incoming.get(step.id) || []).forEach(link => {
+                (inAbove ? offViewTags.above : offViewTags.below).push(
+                  <div className={styles.offViewLink} key={`in-${link.other.id}`} title={link.other.actionDescription}>
+                    &larr; From {link.other.processStepId} · {link.other.actionDescription}{link.label ? ` (${link.label})` : ''}
+                  </div>
+                );
+              });
+              (offViewLinks.outgoing.get(step.id) || []).forEach(link => {
+                (outBelow ? offViewTags.below : offViewTags.above).push(
+                  <div className={styles.offViewLink} key={`out-${link.other.id}`} title={link.other.actionDescription}>
+                    {link.label ? `(${link.label}) ` : ''}To {link.other.processStepId} · {link.other.actionDescription} &rarr;
+                  </div>
+                );
+              });
               return (
                 <div
                   className={cellClassName}
@@ -1565,6 +1699,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                   onDrop={handleDrop(step, lane)}
                 >
                   {belongsToLane && (
+                    <div className={styles.nodeStack}>
+                    {offViewTags.above.length > 0 && <div className={styles.offViewAbove}>{offViewTags.above}</div>}
                     <div
                       ref={el => { if (el) nodeRefs.current.set(step.id, el); }}
                       className={[styles.draggableNode, draggingStepId === step.id ? styles.dragging : ''].filter(Boolean).join(' ')}
@@ -1591,6 +1727,8 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                         onConnectorDragEnd={handleConnectDragEnd}
                         connectable={isValidConnectionTarget(step)}
                       />
+                    </div>
+                    {offViewTags.below.length > 0 && <div className={styles.offViewBelow}>{offViewTags.below}</div>}
                     </div>
                   )}
                 </div>
@@ -1624,6 +1762,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
           </React.Fragment>
           );
         })}
+      </div>
       </div>
 
       <Modal isOpen={!!(selectedNodeId && editDraft)} onDismiss={closeEditPopup} isBlocking={false} containerClassName={styles.editModal}>
