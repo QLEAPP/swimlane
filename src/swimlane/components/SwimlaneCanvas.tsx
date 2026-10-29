@@ -127,12 +127,6 @@ interface IEdgeGeometry {
 // multi-party lane like "Vendor, Business, Finance Manager").
 const ZOOM_LEVELS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
 
-// The far end of an arrow that leaves the current view (see offViewLinks).
-interface IOffViewLink {
-  other: IProcessStep;
-  label?: string;
-}
-
 function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
   const parts = raw.split(' / ').map(p => p.trim());
   if (parts.length !== 3) return { primary: raw };
@@ -159,10 +153,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const gridRef = React.useRef<HTMLDivElement>(null);
   const nodeRefs = React.useRef(new Map<string, HTMLDivElement>());
   const [edgeGeometry, setEdgeGeometry] = React.useState<IEdgeGeometry[]>([]);
-  // Which sides of each box drawn arrows attach to - off-view link tags
-  // go on a side that's free (see offViewSide), so an arrow leaving the
-  // box never runs through one.
-  const [usedSides, setUsedSides] = React.useState<Map<string, Set<Side>>>(new Map());
   // Ad-hoc multi-selection for "drop more than one step in a row" - kept
   // entirely separate from selectedNodeId (which means "this step's edit
   // panel is open"); a plain click still opens one step to edit as before,
@@ -696,28 +686,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
     [edges, stepsById]
   );
 
-  // Arrows with only ONE end on screen - visibleEdges drops them, so a
-  // single section's first step looked like it came from nowhere and its
-  // last led nowhere, on screen and in the PDF alike. Shown instead as
-  // small "From 9.6.1.1 · ..." / "To 9.6.1.3 · ..." tags on the box
-  // (off-page connectors) - user request, 2026-10-29: "when printing a
-  // specific section ... show where the arrows start from".
-  const offViewLinks = React.useMemo(() => {
-    const allById = new Map(allSteps.map(s => [s.id, s]));
-    const incoming = new Map<string, IOffViewLink[]>();
-    const outgoing = new Map<string, IOffViewLink[]>();
-    edges.forEach(e => {
-      const fromShown = stepsById.has(e.fromRowId);
-      if (fromShown === stepsById.has(e.toRowId)) return;
-      const other = allById.get(fromShown ? e.toRowId : e.fromRowId);
-      if (!other) return;
-      const map = fromShown ? outgoing : incoming;
-      const key = fromShown ? e.fromRowId : e.toRowId;
-      map.set(key, [...(map.get(key) || []), { other, label: e.label }]);
-    });
-    return { incoming, outgoing };
-  }, [edges, stepsById, allSteps]);
-
   const connectionsForSelectedNode = React.useMemo(
     () => selectedNodeId ? visibleEdges.filter(e => e.fromRowId === selectedNodeId) : [],
     [visibleEdges, selectedNodeId]
@@ -1045,12 +1013,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       return { edge, path: result.d, labelX: result.labelX, labelY: result.labelY, draggableY: true };
     });
     setEdgeGeometry(geometries);
-    const sides = new Map<string, Set<Side>>();
-    attachments.forEach(att => {
-      const nodeId = att.role === 'from' ? att.edge.fromRowId : att.edge.toRowId;
-      sides.set(nodeId, (sides.get(nodeId) || new Set<Side>()).add(att.side));
-    });
-    setUsedSides(sides);
   }, [visibleEdges, orderedSteps, stepsById, highwayTrackCount, edgeYOffsets]);
 
   React.useLayoutEffect(() => {
@@ -1680,26 +1642,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 // during the export capture, never in normal editing.
                 !belongsToLane && exporting ? styles.emptyCellExport : ''
               ].filter(Boolean).join(' ');
-              // Incoming tags prefer the top, outgoing the bottom, unless a
-              // drawn arrow already uses that side - then the other one.
-              const used = usedSides.get(step.id) || new Set<Side>();
-              const inAbove = !used.has('top') || used.has('bottom');
-              const outBelow = !used.has('bottom') || used.has('top');
-              const offViewTags: { above: React.ReactNode[]; below: React.ReactNode[] } = { above: [], below: [] };
-              (offViewLinks.incoming.get(step.id) || []).forEach(link => {
-                (inAbove ? offViewTags.above : offViewTags.below).push(
-                  <div className={styles.offViewLink} key={`in-${link.other.id}`} title={link.other.actionDescription}>
-                    &larr; From {link.other.processStepId} · {link.other.actionDescription}{link.label ? ` (${link.label})` : ''}
-                  </div>
-                );
-              });
-              (offViewLinks.outgoing.get(step.id) || []).forEach(link => {
-                (outBelow ? offViewTags.below : offViewTags.above).push(
-                  <div className={styles.offViewLink} key={`out-${link.other.id}`} title={link.other.actionDescription}>
-                    {link.label ? `(${link.label}) ` : ''}To {link.other.processStepId} · {link.other.actionDescription} &rarr;
-                  </div>
-                );
-              });
               return (
                 <div
                   className={cellClassName}
@@ -1709,8 +1651,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                   onDrop={handleDrop(step, lane)}
                 >
                   {belongsToLane && (
-                    <div className={styles.nodeStack}>
-                    {offViewTags.above.length > 0 && <div className={styles.offViewAbove}>{offViewTags.above}</div>}
                     <div
                       ref={el => { if (el) nodeRefs.current.set(step.id, el); }}
                       className={[styles.draggableNode, draggingStepId === step.id ? styles.dragging : ''].filter(Boolean).join(' ')}
@@ -1737,8 +1677,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                         onConnectorDragEnd={handleConnectDragEnd}
                         connectable={isValidConnectionTarget(step)}
                       />
-                    </div>
-                    {offViewTags.below.length > 0 && <div className={styles.offViewBelow}>{offViewTags.below}</div>}
                     </div>
                   )}
                 </div>
