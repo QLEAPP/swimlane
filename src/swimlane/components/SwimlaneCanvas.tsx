@@ -1182,10 +1182,12 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const draggedStepToEnd = draggingStepId && lastStep && draggingStepId !== lastStep.id
     ? stepsById.get(draggingStepId)
     : undefined;
-  const moveStepToEnd = (lane: string): void => {
-    const dragged = draggedStepToEnd;
+  // `lane` undefined keeps the step in its own lane (the "Next step"
+  // heading and the edit panel's "Move to the end" button).
+  const moveStepToEnd = (dragged: IProcessStep | undefined, lane?: string): void => {
     setDraggingStepId(undefined);
-    if (!dragged || !lastStep || isLocked) return;
+    if (!dragged || !lastStep || dragged.id === lastStep.id || isLocked) return;
+    if (lane === undefined) lane = dragged.responsibleJobTitle || 'Unassigned';
     const pointsAtDragged = (token: string): boolean => resolveTokenToStepId(allSteps, token) === dragged.id;
     const predecessorIds = dependsOnTokensToStepIds(allSteps, dragged.dependsOn);
     // A Yes/No label on the way INTO the moved step belongs to that
@@ -1460,7 +1462,30 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
           );
         })}
         {showNextColumn && (
-          <div className={styles.columnHeader}><span>Next step</span></div>
+          <div
+            // The heading is where people actually aim when dragging a step
+            // "into the Next step column" - it only used to accept drops on
+            // the lane cells below it, so dropping here did nothing
+            // (confirmed real user report, 2026-10-29). Keeps the step's
+            // own lane, since the heading isn't in any lane row.
+            className={[
+              styles.columnHeader,
+              draggedStepToEnd ? styles.validDropTarget : '',
+              dragOverCellId === 'next-header' ? styles.dragOver : ''
+            ].filter(Boolean).join(' ')}
+            onDragOver={e => {
+              if (!draggedStepToEnd) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setDragOverCellId('next-header');
+            }}
+            onDragLeave={() => setDragOverCellId(prev => (prev === 'next-header' ? undefined : prev))}
+            onDrop={e => {
+              e.preventDefault();
+              setDragOverCellId(undefined);
+              moveStepToEnd(draggedStepToEnd);
+            }}
+          ><span>Next step</span></div>
         )}
 
         <div
@@ -1579,9 +1604,6 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                   dragOverCellId === `${lane}-next` ? styles.dragOver : ''
                 ].filter(Boolean).join(' ')}
                 onDragOver={e => {
-                  // Accepted even when the dependency rule will refuse it -
-                  // moveStepToEnd then explains why instead of a silent
-                  // "not allowed" cursor.
                   if (!draggingNewShape && !draggedStepToEnd) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = draggingNewShape ? 'copy' : 'move';
@@ -1591,7 +1613,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 onDrop={e => {
                   e.preventDefault();
                   setDragOverCellId(undefined);
-                  if (draggedStepToEnd) { moveStepToEnd(lane); return; }
+                  if (draggedStepToEnd) { moveStepToEnd(draggedStepToEnd, lane); return; }
                   const shapeOverride = draggingNewShape;
                   setDraggingNewShape(undefined);
                   if (!shapeOverride || isLocked) return;
@@ -1651,6 +1673,21 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
               />
               <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked || missingRequiredFields(editDraft).length > 0} />
               {!isLocked && <MissingFieldsNote value={editDraft} />}
+              {/*
+                The same move as dropping the step on the "Next step"
+                column, without having to drag it across a wide diagram
+                (user report, 2026-10-29: dragging to the end "still doesn't
+                allow me"). Acts on the step as last saved - unsaved edits
+                in this panel are dropped, the same as closing it.
+              */}
+              {!isLocked && selectedNodeId && lastStep && selectedNodeId !== lastStep.id && (
+                <DefaultButton
+                  text="Move to the end"
+                  iconProps={{ iconName: 'Forward' }}
+                  title={`Move this step after "${lastStep.actionDescription}" and reconnect the steps around it`}
+                  onClick={() => { const step = stepsById.get(selectedNodeId); closeEditPopup(); moveStepToEnd(step); }}
+                />
+              )}
             </div>
 
             {(() => {
