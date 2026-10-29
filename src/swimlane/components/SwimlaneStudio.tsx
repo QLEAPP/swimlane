@@ -136,6 +136,7 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
   actionType: 'Execute (Within Limits)',
   shapeOverride: '',
   responsibleJobTitle: '',
+  sectionId: '',
   dependsOnStepIds: [],
   edgeLabelsByDependsOnId: {},
   linkedRisks: [],
@@ -578,6 +579,15 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   // buried in noise. No excludeStepId - a brand-new step has no "self" to
   // leave out, unlike the edit panel's version of this same list.
   const addStepDependsOnOptions = React.useMemo(() => buildDependsOnOptions(stepsInRegion), [stepsInRegion]);
+  // What the add form's Section field shows before anything is picked -
+  // the same section handleAddStep would use anyway (the open tab, else
+  // the last section), so the field never claims something it won't do.
+  const defaultAddSectionId = React.useMemo(
+    () => drilledDownStepId
+      || stepsInRegion.map(s => s.processStepId).sort(compareProcessStepIds).pop()
+      || '',
+    [drilledDownStepId, stepsInRegion]
+  );
 
   const visibleSteps = React.useMemo(
     () => drilledDownStepId ? stepsInRegion.filter(s => s.processStepId === drilledDownStepId) : stepsInRegion,
@@ -1183,7 +1193,14 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
         undefined
       );
     const lastSectionReferenceStep = latestSectionIn(stepsInRegion) || latestSectionIn(stepsInProcessId);
-    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = newStepDraft;
+    // A section picked in the form wins over both defaults below. Also
+    // covers the drilled-into tab, whose name used to fall through to the
+    // FIRST section's name (regionReferenceStep) instead of its own.
+    const chosenSectionId = newStepDraft.sectionId || drilledDownStepId;
+    const pickedSectionStep = chosenSectionId
+      ? stepsInRegion.find(s => s.processStepId === chosenSectionId)
+      : undefined;
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, sectionId: _sectionId, ...fields } = newStepDraft;
     setSaving(true);
     dataService.addProcessStep({
       apqcTitle: regionReferenceStep
@@ -1209,12 +1226,13 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       // actually belonged with. Only actually falls through to the bare
       // selectedProcessId for a genuinely brand-new, currently-empty
       // Process ID, where there's no real section yet to continue anyway.
-      processStepId: drilledDownStepId || lastSectionReferenceStep?.processStepId || selectedProcessId,
+      processStepId: pickedSectionStep?.processStepId || drilledDownStepId || lastSectionReferenceStep?.processStepId || selectedProcessId,
       // Must match whichever section processStepId above actually landed
       // in - using regionReferenceStep/anyReferenceStep's name here
       // instead (a DIFFERENT, earlier section) would mislabel the new
       // step with the wrong section's name entirely.
-      processStepName: (drilledDownStepId ? undefined : lastSectionReferenceStep?.processStepName)
+      processStepName: pickedSectionStep?.processStepName
+        ?? (drilledDownStepId ? undefined : lastSectionReferenceStep?.processStepName)
         ?? regionReferenceStep?.processStepName ?? anyReferenceStep?.processStepName ?? '',
       region: selectedFlowRegion || '',
       ...fields,
@@ -2019,8 +2037,9 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   })() : (
                     <>
                       <ProcessStepForm
-                        value={newStepDraft}
+                        value={newStepDraft.sectionId ? newStepDraft : { ...newStepDraft, sectionId: defaultAddSectionId }}
                         onChange={setNewStepDraft}
+                        showSection
                         employees={employees}
                         dependsOnOptions={addStepDependsOnOptions}
                         dependsOnSteps={stepsInRegion}

@@ -41,6 +41,7 @@ const emptyStepDraft = (): IProcessStepFormValue => ({
   actionType: 'Execute (Within Limits)',
   shapeOverride: '',
   responsibleJobTitle: '',
+  sectionId: '',
   dependsOnStepIds: [],
   edgeLabelsByDependsOnId: {},
   linkedRisks: [],
@@ -110,7 +111,8 @@ const NewProcessModal: React.FC<INewProcessModalProps> = ({
     if (!canSubmit) return;
     setSaving(true);
     setError(undefined);
-    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = stepValue;
+    // sectionId stays unused - this modal has its own Process Step ID field.
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, sectionId: _sectionId, ...fields } = stepValue;
 
     const groupLabelStep = isNewGroup && groupId
       ? dataService.addProcessGroupLabel(groupId, processGroupName.trim()).then(created => { onGroupLabelCreated(created); })

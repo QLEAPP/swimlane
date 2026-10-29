@@ -10,7 +10,7 @@ import { IEmployee } from '../models/IEmployee';
 import { IDataService } from '../services/IDataService';
 import { SwimlaneStage } from '../models/ISwimlaneStatus';
 import { IResolvedEdge, dependsOnTokensToStepIds, stepIdsToDependsOnTokens, buildDependsOnOptions, buildEdgeLabels, edgeLabelsToDependsOnDraft, convertLegacyTokens } from '../utils/dependencyResolution';
-import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder } from '../utils/columns';
+import { orderStepsForTimeline, buildColumnGroups, computeDropOrder, dropKeepsDependencyOrder, computeInsertOrderAfter } from '../utils/columns';
 import { connectorPath, highwayPath, pickSides, rectFromDomRect, IRect, Side } from '../utils/arrowRouting';
 import ShapeNode from './shapes/ShapeNode';
 import ShapeLegend from './ShapeLegend';
@@ -1009,6 +1009,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       // DRAWS as, so the panel shows the truth and saving doesn't block.
       shapeOverride: shapeTypeToOverride(getShapeType(step)),
       responsibleJobTitle: step.responsibleJobTitle,
+      sectionId: step.processStepId,
       dependsOnStepIds: dependsOnTokensToStepIds(allSteps, step.dependsOn),
       edgeLabelsByDependsOnId: edgeLabelsToDependsOnDraft(allSteps, step.edgeLabels),
       linkedRisks: step.linkedRisks || [],
@@ -1067,10 +1068,24 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
   const saveEdit = (): void => {
     const original = selectedNodeId ? stepsById.get(selectedNodeId) : undefined;
     if (!original || !editDraft) return;
-    const { dependsOnStepIds, edgeLabelsByDependsOnId, ...fields } = editDraft;
+    const { dependsOnStepIds, edgeLabelsByDependsOnId, sectionId, ...fields } = editDraft;
     const dependsOn = stepIdsToDependsOnTokens(allSteps, dependsOnStepIds);
+    // Moving to another section via the Section field puts the step at the
+    // END of that section and takes on its name, the same as if it had
+    // been added there fresh.
+    const sectionMove = (() => {
+      if (!sectionId || sectionId === original.processStepId) return {};
+      const sectionSteps = swimlaneSteps.filter(s => s.processStepId === sectionId && s.id !== original.id);
+      if (sectionSteps.length === 0) return {};
+      const lastInSection = orderStepsForTimeline(sectionSteps).pop();
+      return {
+        processStepId: sectionId,
+        processStepName: sectionSteps[0].processStepName,
+        manualOrder: lastInSection ? computeInsertOrderAfter(allSteps, lastInSection.id) : undefined
+      };
+    })();
     const edgeLabels = buildEdgeLabels(allSteps, edgeLabelsByDependsOnId, dependsOnStepIds);
-    onEditStep({ ...original, ...fields, dependsOn, edgeLabels });
+    onEditStep({ ...original, ...fields, ...sectionMove, dependsOn, edgeLabels });
   };
 
   const closeEditPopup = (): void => {
@@ -1559,6 +1574,7 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
                 onControlLinked={onControlLinked}
                 onControlCreated={onControlCreated}
                 onRiskCreated={onRiskCreated}
+                showSection
               />
               <PrimaryButton text="Save changes" onClick={() => { saveEdit(); closeEditPopup(); }} disabled={isLocked || missingRequiredFields(editDraft).length > 0} />
               {!isLocked && <MissingFieldsNote value={editDraft} />}

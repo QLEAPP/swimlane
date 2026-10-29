@@ -5,6 +5,7 @@ import { IRiskStatement, IRiskLink } from '../models/IRiskStatement';
 import { IControlStatement } from '../models/IControlStatement';
 import { IProcessStep, ShapeType, getShapeType } from '../models/IProcessStep';
 import { IDataService } from '../services/IDataService';
+import { compareProcessStepIds } from '../utils/columns';
 import EmployeePicker from './EmployeePicker';
 import RiskLinkPicker from './RiskLinkPicker';
 import ControlLinkPicker from './ControlLinkPicker';
@@ -20,6 +21,12 @@ export interface IProcessStepFormValue {
   actionType: string;
   shapeOverride: string;
   responsibleJobTitle: string;
+  // Which section (Process Step ID, e.g. "9.6.1.2") the step sits in -
+  // pickable in the form since 2026-10-29 (user request: moving a step to
+  // another section was "impossible" without dragging it across the
+  // canvas). '' means "not chosen", and the add flow falls back to its
+  // usual default (see handleAddStep in SwimlaneStudio.tsx).
+  sectionId: string;
   dependsOnStepIds: string[];
   // Branch label (e.g. "Yes"/"No") for a picked dependency that's a
   // Decision, keyed by that dependency's step id - added 2026-09-28 at
@@ -109,17 +116,30 @@ export interface IProcessStepFormProps {
   // Fires after a brand-new risk is created via RiskLinkPicker's own
   // inline "create" section - see the prop comment there.
   onRiskCreated: (created: IRiskStatement) => void;
+  // Off for NewProcessModal, which asks for a brand-new Process Step ID
+  // itself instead of picking an existing section.
+  showSection?: boolean;
 }
 
 const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
   value, onChange, employees, dependsOnOptions, dependsOnSteps, riskStatements, controlStatements, processStepId, processDescription,
-  dataService, onControlLinked, onControlCreated, onRiskCreated
+  dataService, onControlLinked, onControlCreated, onRiskCreated, showSection
 }) => {
   const set = <K extends keyof IProcessStepFormValue>(key: K, v: IProcessStepFormValue[K]): void => {
     onChange({ ...value, [key]: v });
   };
 
   const dependsOnStepsById = React.useMemo(() => new Map(dependsOnSteps.map(s => [s.id, s])), [dependsOnSteps]);
+  // dependsOnSteps is the whole swimlane (this Process ID + region) in
+  // both forms, so it already holds every section the step could sit in.
+  // Named the same way the section tabs name them (first step wins).
+  const sectionOptions: IDropdownOption[] = React.useMemo(() => {
+    const ids = Array.from(new Set(dependsOnSteps.map(s => s.processStepId))).sort(compareProcessStepIds);
+    return ids.map(id => {
+      const name = dependsOnSteps.find(s => s.processStepId === id)?.processStepName;
+      return { key: id, text: name ? `${id} — ${name}` : id };
+    });
+  }, [dependsOnSteps]);
   // Only Decision dependencies need a branch label - confirmed design rule
   // (see findUnlabeledDecisionEdges) is every OUTGOING edge from a
   // Decision needs one, which is exactly "this new/edited step depends on
@@ -163,6 +183,15 @@ const ProcessStepForm: React.FC<IProcessStepFormProps> = ({
         value={value.responsibleJobTitle}
         onChange={jobTitle => set('responsibleJobTitle', jobTitle)}
       />
+      {/* Nothing to choose between until the swimlane has a section. */}
+      {showSection && sectionOptions.length > 0 && (
+        <Dropdown
+          label="Section"
+          selectedKey={value.sectionId || null}
+          options={sectionOptions}
+          onChange={(_e, option) => option && set('sectionId', String(option.key))}
+        />
+      )}
       <Checkbox
         label="This step depends on nothing"
         // Derived from the selection itself rather than tracked as its
