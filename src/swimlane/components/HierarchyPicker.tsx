@@ -1,4 +1,5 @@
 ﻿import * as React from 'react';
+import { Icon } from '@fluentui/react';
 import { IProcessStep } from '../models/IProcessStep';
 import { compareProcessStepIds } from '../utils/columns';
 import styles from './HierarchyPicker.module.scss';
@@ -31,6 +32,9 @@ export interface IHierarchyPickerProps {
   // time (same "first rename creates a label" behaviour as the other two
   // levels), rather than editing anything in the static table itself.
   onRename?: (groupId: string, currentLabel: string) => void;
+  // Process ID level only - deleting a Category/Process Group would wipe
+  // whole branches of processes in one click, which nobody asked for.
+  onDelete?: (groupId: string, currentLabel: string) => void;
   // When set, a card's count shows the number of DISTINCT values this
   // returns per step (e.g. distinct Process Group IDs), not the number of
   // raw process steps - used at the Category level, where "steps" was a
@@ -59,7 +63,7 @@ export interface IHierarchyPickerProps {
 // group. The same component powers all three levels above the swimlane
 // itself, so they look and behave identically by construction.
 const HierarchyPicker: React.FC<IHierarchyPickerProps> = ({
-  steps, getGroupId, getLabel, onSelect, emptyMessage, allGroupIds, onAddNew, addNewLabel, onRename,
+  steps, getGroupId, getLabel, onSelect, emptyMessage, allGroupIds, onAddNew, addNewLabel, onRename, onDelete,
   countBy, countLabel, countLabelPlural, allSubGroupIds
 }) => {
   const groups = React.useMemo(() => {
@@ -105,15 +109,31 @@ const HierarchyPicker: React.FC<IHierarchyPickerProps> = ({
         const plural = countLabelPlural || `${singular}s`;
         return (
           <div className={styles.card} key={group.groupId} onClick={() => onSelect(group.groupId)}>
-            {onRename && (
-              <button
-                type="button"
-                className={styles.renameButton}
-                title="Rename"
-                onClick={e => { e.stopPropagation(); onRename(group.groupId, group.label); }}
-              >
-                ✎
-              </button>
+            {(onRename || onDelete) && (
+              <div className={styles.cardActions}>
+                {onRename && (
+                  <button
+                    type="button"
+                    className={styles.renameButton}
+                    title="Rename"
+                    aria-label={`Rename ${group.groupId}`}
+                    onClick={e => { e.stopPropagation(); onRename(group.groupId, group.label); }}
+                  >
+                    ✎
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    className={`${styles.renameButton} ${styles.deleteButton}`}
+                    title="Delete"
+                    aria-label={`Delete ${group.groupId}`}
+                    onClick={e => { e.stopPropagation(); onDelete(group.groupId, group.label); }}
+                  >
+                    <Icon iconName="Delete" />
+                  </button>
+                )}
+              </div>
             )}
             <span className={styles.code}>{group.groupId}</span>
             <h3>{group.label}</h3>

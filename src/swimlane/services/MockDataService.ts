@@ -168,6 +168,8 @@ export class MockDataService implements IDataService {
   // Same idea, one level down - names for an empty Process ID shell
   // created via "+ Add new process ID" before it has any real steps.
   private _processIdLabels: IProcessIdLabel[] = [];
+  // Counter, not length-based - labels can be deleted now (see _nextStepId).
+  private _nextProcessIdLabelId = 1;
   // Risks added at runtime via "+ Add risk" - kept separate from the
   // static MOCK_RISKS const, same layering reasoning as _addedEmployees.
   private _addedRisks: IRiskStatement[] = [];
@@ -285,7 +287,7 @@ export class MockDataService implements IDataService {
   }
 
   public addProcessIdLabel(processId: string, name: string): Promise<IProcessIdLabel> {
-    const created: IProcessIdLabel = { id: `mock-progress-${this._processIdLabels.length + 1}`, processId, name };
+    const created: IProcessIdLabel = { id: `mock-progress-${this._nextProcessIdLabelId++}`, processId, name };
     this._processIdLabels.push(created);
     return Promise.resolve(created);
   }
@@ -293,6 +295,11 @@ export class MockDataService implements IDataService {
   public updateProcessIdLabel(id: string, name: string): Promise<void> {
     const index = this._processIdLabels.findIndex(l => l.id === id);
     if (index >= 0) this._processIdLabels[index] = { ...this._processIdLabels[index], name };
+    return Promise.resolve();
+  }
+
+  public deleteProcessIdLabel(id: string): Promise<void> {
+    this._processIdLabels = this._processIdLabels.filter(l => l.id !== id);
     return Promise.resolve();
   }
 

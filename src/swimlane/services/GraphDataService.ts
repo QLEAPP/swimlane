@@ -629,6 +629,12 @@ export class GraphDataService implements IDataService {
     await this._graph.patch(`/sites/${siteId}/lists/${listId}/items/${id}/fields`, { [titleField]: name });
   }
 
+  public async deleteProcessIdLabel(id: string): Promise<void> {
+    const siteId = await this._resolveSiteId();
+    const listId = await this._resolveListId(PROCESS_ID_LABELS_LIST_TITLE);
+    await this._graph.delete(`/sites/${siteId}/lists/${listId}/items/${id}`);
+  }
+
   public async getProcessIdLocks(): Promise<IProcessIdLock[]> {
     const fieldMap = await this._resolveFieldMap(PROCESS_ID_LOCKS_LIST_TITLE);
     const items = await this._getItems(PROCESS_ID_LOCKS_LIST_TITLE);

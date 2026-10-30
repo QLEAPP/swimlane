@@ -42,10 +42,15 @@
 // Only shown when the caller passes onRename (Process Group level) -
 // stays out of the way of the card's own click-to-open behavior via
 // stopPropagation in HierarchyPicker.tsx.
-.renameButton {
+.cardActions {
   position: absolute;
   top: 14px;
   right: 14px;
+  display: flex;
+  gap: 6px;
+}
+
+.renameButton {
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -64,6 +69,12 @@
     border-color: var(--blue);
     color: var(--blue);
   }
+}
+
+.deleteButton:hover {
+  background: var(--surface);
+  border-color: var(--risk-high);
+  color: var(--risk-high);
 }
 
 .code {

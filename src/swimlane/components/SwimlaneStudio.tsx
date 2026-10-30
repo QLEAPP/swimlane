@@ -12,7 +12,7 @@ import { IControlStatement } from '../models/IControlStatement';
 import { IProcessGroupLabel } from '../models/IProcessGroupLabel';
 import { ICategoryLabel } from '../models/ICategoryLabel';
 import { IProcessIdLabel } from '../models/IProcessIdLabel';
-import { IProcessIdLock, findActiveLock } from '../models/IProcessIdLock';
+import { IProcessIdLock, findActiveLock, isLockActive } from '../models/IProcessIdLock';
 import { ISwimlaneComment } from '../models/ISwimlaneComment';
 import { ISwimlaneStatus, SwimlaneStage } from '../models/ISwimlaneStatus';
 import {
@@ -216,6 +216,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
   const [convertLinksDialogOpen, setConvertLinksDialogOpen] = React.useState(false);
   const [convertingLinks, setConvertingLinks] = React.useState(false);
   const [convertLinksMessage, setConvertLinksMessage] = React.useState<string | undefined>(undefined);
+  const [deleteProcessTarget, setDeleteProcessTarget] = React.useState<{ id: string; label: string } | undefined>(undefined);
   const [renameTarget, setRenameTarget] = React.useState<{ level: 'category' | 'processGroup' | 'processId'; id: string; currentLabel: string } | undefined>(undefined);
   const [renameValue, setRenameValue] = React.useState('');
   // Separate from renameTarget/renameValue above - a section isn't a
@@ -702,6 +703,34 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
     });
     pushUndo({ type: 'bulkDelete', steps: deleted });
     setBulkDeleteOpen(false);
+  };
+
+  // A whole Process ID - every region's steps plus its custom name -
+  // added 2026-10-29 at the user's request ("edit and delete processes").
+  // Same "remove locally, undo re-creates the steps" pattern as
+  // handleBulkDelete. The custom name isn't part of the undo: only an
+  // empty shell needs one (a process with steps is named by them).
+  const deleteProcessSteps = deleteProcessTarget
+    ? steps.filter(s => getProcessId(s.processStepId) === deleteProcessTarget.id)
+    : [];
+  // Locks are per region - one locked region of the process is enough to
+  // refuse deleting all of it.
+  const deleteProcessLockedRegions = deleteProcessTarget
+    ? Array.from(new Set(processIdLocks.filter(l => l.processId === deleteProcessTarget.id && isLockActive(l)).map(l => l.region || 'No region')))
+    : [];
+
+  const handleDeleteProcessConfirm = (): void => {
+    if (!deleteProcessTarget || deleteProcessLockedRegions.length > 0) return;
+    if (deleteProcessSteps.length > 0 && blockDeleteForLegacyLinks()) { setDeleteProcessTarget(undefined); return; }
+    const deleted = deleteProcessSteps.slice();
+    const ids = new Set(deleted.map(s => s.id));
+    setSteps(prev => prev.filter(s => !ids.has(s.id)));
+    deleted.forEach(s => dataService.deleteProcessStep(s.id).catch((err: Error) => setError(err.message)));
+    const labels = processIdLabels.filter(l => l.processId === deleteProcessTarget.id);
+    setProcessIdLabels(prev => prev.filter(l => l.processId !== deleteProcessTarget.id));
+    labels.forEach(l => dataService.deleteProcessIdLabel(l.id).catch((err: Error) => setError(err.message)));
+    if (deleted.length > 0) pushUndo({ type: 'bulkDelete', steps: deleted });
+    setDeleteProcessTarget(undefined);
   };
 
   // Reverts a single action's content - shared by handleUndo (one) and
@@ -1509,6 +1538,32 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
       />
 
       <Dialog
+        hidden={!deleteProcessTarget}
+        onDismiss={() => setDeleteProcessTarget(undefined)}
+        minWidth={460}
+        dialogContentProps={{
+          type: DialogType.normal,
+          title: `Delete ${deleteProcessTarget?.id || ''} - ${deleteProcessTarget?.label || ''}?`,
+          subText: deleteProcessLockedRegions.length > 0
+            ? `This process is locked (${deleteProcessLockedRegions.join(', ')}). Unlock it before deleting it.`
+            : deleteProcessSteps.length > 0
+              ? `This permanently removes all ${deleteProcessSteps.length} step${deleteProcessSteps.length === 1 ? '' : 's'} in it, in every region - not just the one you last viewed. You'll have a short window to undo it afterward.`
+              : 'This process has no steps - deleting it just removes it from the list.'
+        }}
+      >
+        <DialogFooter>
+          <DefaultButton text="Cancel" onClick={() => setDeleteProcessTarget(undefined)} />
+          {deleteProcessLockedRegions.length === 0 && (
+            <PrimaryButton
+              text={deleteProcessSteps.length > 0 ? `Delete process and ${deleteProcessSteps.length} step${deleteProcessSteps.length === 1 ? '' : 's'}` : 'Delete process'}
+              onClick={handleDeleteProcessConfirm}
+              styles={{ root: { background: 'var(--risk-high)', border: 'none' }, rootHovered: { background: '#b02419' } }}
+            />
+          )}
+        </DialogFooter>
+      </Dialog>
+
+      <Dialog
         hidden={!bulkDeleteOpen}
         onDismiss={() => setBulkDeleteOpen(false)}
         dialogContentProps={{
@@ -1887,6 +1942,7 @@ const SwimlaneStudio: React.FC<ISwimlaneStudioProps> = (props) => {
                   onAddNew={() => setAddShellState({ level: 'processId', idPrefix: `${selectedProcessGroupId}.` })}
                   addNewLabel="+ Add new process ID"
                   onRename={(id, label) => openRename('processId', id, label)}
+                  onDelete={(id, label) => setDeleteProcessTarget({ id, label })}
                 />
               </>
             ) : (

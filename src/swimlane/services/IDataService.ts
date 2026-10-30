@@ -66,6 +66,10 @@ export interface IDataService {
   getProcessIdLabels(): Promise<IProcessIdLabel[]>;
   addProcessIdLabel(processId: string, name: string): Promise<IProcessIdLabel>;
   updateProcessIdLabel(id: string, name: string): Promise<void>;
+  // Only ever as part of deleting a whole Process ID (see
+  // handleDeleteProcessConfirm in SwimlaneStudio.tsx) - without it a
+  // deleted custom process would come straight back as an empty card.
+  deleteProcessIdLabel(id: string): Promise<void>;
   getProcessIdLocks(): Promise<IProcessIdLock[]>;
   // Always creates a NEW record (see IProcessIdLock for why - append-only
   // audit trail, not a mutable status flag).
