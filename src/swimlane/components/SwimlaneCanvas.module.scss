@@ -443,6 +443,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  // The drag handle for moving the popup (see EDIT_POPUP_DRAG_OPTIONS).
+  cursor: move;
+  user-select: none;
 
   h4 {
     margin: 0;

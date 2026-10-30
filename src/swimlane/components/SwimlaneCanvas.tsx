@@ -1,6 +1,6 @@
 ﻿import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField, MessageBar, MessageBarType } from '@fluentui/react';
+import { DefaultButton, PrimaryButton, IconButton, Modal, IDropdownOption, Callout, TextField, MessageBar, MessageBarType, ContextualMenu, IDragOptions } from '@fluentui/react';
 import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import { IProcessStep, getShapeType, getProcessId } from '../models/IProcessStep';
@@ -126,6 +126,17 @@ interface IEdgeGeometry {
 // string untouched for values that don't follow the pattern (e.g. a
 // multi-party lane like "Vendor, Business, Finance Manager").
 const ZOOM_LEVELS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+
+// A plain (unhashed) class - Fluent's dragHandleSelector is a CSS
+// selector, which a CSS-module class name can't be written as up front.
+const EDIT_POPUP_DRAG_HANDLE = 'swimlane-edit-drag-handle';
+const EDIT_POPUP_DRAG_OPTIONS: IDragOptions = {
+  moveMenuItemText: 'Move',
+  closeMenuItemText: 'Close',
+  menu: ContextualMenu,
+  dragHandleSelector: `.${EDIT_POPUP_DRAG_HANDLE}`,
+  keepInBounds: true
+};
 
 function formatLaneLabel(raw: string): { primary: string; secondary?: string } {
   const parts = raw.split(' / ').map(p => p.trim());
@@ -1713,10 +1724,18 @@ const SwimlaneCanvas: React.FC<ISwimlaneCanvasProps> = ({
       </div>
       </div>
 
-      <Modal isOpen={!!(selectedNodeId && editDraft)} onDismiss={closeEditPopup} isBlocking={false} containerClassName={styles.editModal}>
+      <Modal
+        isOpen={!!(selectedNodeId && editDraft)}
+        onDismiss={closeEditPopup}
+        isBlocking={false}
+        containerClassName={styles.editModal}
+        // Draggable by its header (user request, 2026-10-30) - centred on
+        // screen it covered exactly the part of the diagram being edited.
+        dragOptions={EDIT_POPUP_DRAG_OPTIONS}
+      >
         {editDraft && (
           <div className={styles.connectionsPanel}>
-            <div className={styles.editHeader}>
+            <div className={`${styles.editHeader} ${EDIT_POPUP_DRAG_HANDLE}`} title="Drag to move">
               <h4>Edit task</h4>
               <div>
                 <IconButton iconProps={{ iconName: 'Delete' }} title="Delete this task" onClick={deleteSelected} disabled={isLocked} />
