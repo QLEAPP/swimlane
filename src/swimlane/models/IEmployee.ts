@@ -33,4 +33,6 @@ export interface IEmployee {
 // GUARANTEED_FUNCTIONS in models/IRiskStatement.ts. 'Vendor' added
 // 2026-10-20 at the user's request - external suppliers own real steps
 // (e.g. submitting an invoice) but never appear in the Employees list.
-export const GUARANTEED_JOB_TITLES = ['Executive Sponsor', 'Business', 'Vendor'];
+// 'Line Manager' added 2026-10-29 at the user's request - whoever the
+// requester reports to, so a generic role rather than one HR row.
+export const GUARANTEED_JOB_TITLES = ['Executive Sponsor', 'Business', 'Vendor', 'Line Manager'];
